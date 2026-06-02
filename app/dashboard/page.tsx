@@ -14,7 +14,67 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// ─── HYDRATION FIX: Client-only rendering hook ───
+// ─── DATA ORIGIN BADGE (NEW — PHASE 1) ───
+interface DataOrigin {
+  source: "LOCAL_REGISTRY" | "HYBRID_WEB_SCRAPE" | "AI_ESTIMATE" | "DEMO_MODE" | "INSUFFICIENT";
+  confidence: "HIGH" | "MEDIUM" | "LOW" | "NONE";
+  sourcesCount: number;
+  lastUpdated: string;
+  isDemoMode: boolean;
+  fallbackReason?: string;
+}
+
+const ORIGIN_CONFIG = {
+  LOCAL_REGISTRY: {
+    color: "bg-green-500/20 text-green-400 border-green-500/50",
+    icon: "✓",
+    label: "VERIFIED DATA"
+  },
+  HYBRID_WEB_SCRAPE: {
+    color: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50",
+    icon: "⚠",
+    label: "WEB SOURCES"
+  },
+  AI_ESTIMATE: {
+    color: "bg-red-500/20 text-red-400 border-red-500/50",
+    icon: "✗",
+    label: "AI ESTIMATE"
+  },
+  DEMO_MODE: {
+    color: "bg-purple-500/20 text-purple-400 border-purple-500/50",
+    icon: "DEMO",
+    label: "DEMO DATA"
+  },
+  INSUFFICIENT: {
+    color: "bg-gray-500/20 text-gray-400 border-gray-500/50",
+    icon: "?",
+    label: "NO DATA"
+  }
+};
+
+function DataOriginBadge({ origin }: { origin: DataOrigin }) {
+  const style = ORIGIN_CONFIG[origin.source] || ORIGIN_CONFIG.INSUFFICIENT;
+  
+  return (
+    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded border ${style.color} text-xs font-mono`}>
+      <span>{style.icon}</span>
+      <span className="font-semibold">{style.label}</span>
+      <span className="opacity-60">|</span>
+      <span>{origin.confidence} CONFIDENCE</span>
+      {origin.sourcesCount > 0 && (
+        <>
+          <span className="opacity-60">|</span>
+          <span>{origin.sourcesCount} sources</span>
+        </>
+      )}
+      {origin.isDemoMode && (
+        <span className="ml-1 text-purple-300 font-bold">[DEMO]</span>
+      )}
+    </div>
+  );
+}
+
+// ─── HYDRATION FIX ───
 function useClientOnly() {
   const [mounted, setMounted] = useState(false);
   useEffect(() => {
@@ -31,6 +91,7 @@ function StampOverlay({ verdict, visible }: { verdict: string; visible: boolean 
     HIGH_YIELD: { text: "HIGH YIELD // CONFIRMED", color: "#00C853", rotate: "8deg" },
     REJECT: { text: "REJECT // RISK ALERT", color: "#FF2200", rotate: "-6deg" },
     HOLD: { text: "HOLD // PENDING REVIEW", color: "#666", rotate: "0deg" },
+    INSUFFICIENT_DATA: { text: "NO DATA // VERIFY", color: "#FF2200", rotate: "-4deg" },
   };
   const s = stamps[verdict] || stamps.HOLD;
   return (
@@ -67,7 +128,7 @@ function EvidenceCard({
 }) {
   const [showStamp, setShowStamp] = useState(false);
   useEffect(() => {
-    if (stamp && stamp !== "HOLD") {
+    if (stamp && stamp !== "HOLD" && stamp !== "INSUFFICIENT_DATA") {
       setShowStamp(true);
       const t = setTimeout(() => setShowStamp(false), 2500);
       return () => clearTimeout(t);
@@ -87,13 +148,32 @@ function EvidenceCard({
   );
 }
 
-// ─── METRIC COUNTER ───
-function MetricCounter({ label, value, suffix = "", color = "#E8E4D9" }: { label: string; value: string | number; suffix?: string; color?: string }) {
-  const [display, setDisplay] = useState("0");
+// ─── METRIC COUNTER (FIXED: Dynamic values, no static zeros) ───
+function MetricCounter({ 
+  label, 
+  value, 
+  suffix = "", 
+  color = "#E8E4D9",
+  isNA = false 
+}: { 
+  label: string; 
+  value: string | number; 
+  suffix?: string; 
+  color?: string;
+  isNA?: boolean;
+}) {
+  const [display, setDisplay] = useState("—");
   const mounted = useClientOnly();
   
   useEffect(() => {
     if (!mounted) return;
+    
+    // FIXED: Handle N/A properly
+    if (isNA || value === "N/A" || value === null || value === undefined) {
+      setDisplay("—");
+      return;
+    }
+    
     const target = parseFloat(value.toString().replace(/[^0-9.-]/g, "")) || 0;
     const duration = 1200;
     const start = performance.now();
@@ -106,7 +186,7 @@ function MetricCounter({ label, value, suffix = "", color = "#E8E4D9" }: { label
       if (progress < 1) requestAnimationFrame(animate);
     };
     requestAnimationFrame(animate);
-  }, [value, mounted]);
+  }, [value, mounted, isNA]);
   
   return (
     <div className="flex flex-col p-4 border-r border-[#111111] last:border-r-0 hover:bg-[#111111]/50 transition-colors duration-300 cursor-default group">
@@ -114,10 +194,13 @@ function MetricCounter({ label, value, suffix = "", color = "#E8E4D9" }: { label
         {label}
       </span>
       <div className="flex items-baseline gap-1">
-        <span className="text-2xl font-bold tracking-tight" style={{ color, fontFamily: "IBM Plex Mono, monospace" }}>
-          {mounted ? display : "0.0"}
+        <span className="text-2xl font-bold tracking-tight" style={{ 
+          color: isNA ? "#FFB800" : color, 
+          fontFamily: "IBM Plex Mono, monospace" 
+        }}>
+          {mounted ? display : "—"}
         </span>
-        {suffix && (
+        {suffix && !isNA && (
           <span className="text-[10px] font-bold opacity-40" style={{ color, fontFamily: "IBM Plex Mono, monospace" }}>
             {suffix}
           </span>
@@ -164,7 +247,7 @@ function TerminalLog({ logs }: { logs: string[] }) {
 // ─── MAIN DASHBOARD ───
 export default function Dashboard() {
   const router = useRouter();
- const scrollRef = useRef<any>(null);
+  const scrollRef = useRef<any>(null);
   const mounted = useClientOnly();
 
   const [activeTab, setActiveTab] = useState("description");
@@ -180,12 +263,17 @@ export default function Dashboard() {
     "[OK] Encryption Layer Verified"
   ]);
 
-  const [scoreState, setScoreState] = useState(0);
-  const [varianceState, setVarianceState] = useState(0);
-  const [yieldState, setYieldState] = useState(0);
+  // FIXED: Dynamic metrics from API response
+  const [scoreState, setScoreState] = useState<number | string>(0);
+  const [varianceState, setVarianceState] = useState<number | string>(0);
+  const [yieldState, setYieldState] = useState<number>(0);
   const [verdictState, setVerdictState] = useState("HOLD");
   const [isFaultActive, setIsFaultActive] = useState(false);
   const [lastStamp, setLastStamp] = useState("");
+
+  // NEW: Data origin tracking
+  const [dataOrigin, setDataOrigin] = useState<DataOrigin | null>(null);
+  const [hasRealData, setHasRealData] = useState(false);
 
   const [property, setProperty] = useState("");
   const [price, setPrice] = useState("");
@@ -222,48 +310,30 @@ export default function Dashboard() {
 
   // ─── FETCH DATA ───
   const fetchData = useCallback(async () => {
-    if (!userId) {
-      console.log("[FETCH] No userId, skipping");
-      return;
-    }
-    
-    console.log("[FETCH] Fetching for user:", userId.substring(0, 8));
+    if (!userId) return;
     
     try {
-      const { data: hist, error: histError } = await supabase
+      const { data: hist } = await supabase
         .from("ai_history")
         .select("*")
         .eq("user_id", userId)
         .order("created_at", { ascending: false });
         
-      if (histError) {
-        console.error("[FETCH] History error:", histError.message);
-      } else {
-        console.log("[FETCH] History loaded:", hist?.length || 0, "records");
-        setHistory(hist || []);
-      }
+      setHistory(hist || []);
       
-      const { data: lds, error: leadError } = await supabase
+      const { data: lds } = await supabase
         .from("leads")
         .select("*")
         .order("created_at", { ascending: false });
         
-      if (leadError) {
-        console.error("[FETCH] Leads error:", leadError.message);
-      } else {
-        console.log("[FETCH] Leads loaded:", lds?.length || 0, "records");
-        setLeads(lds || []);
-      }
+      setLeads(lds || []);
     } catch (err) {
-      console.error("[FETCH] Exception:", err);
+      console.error("[FETCH] Error:", err);
     }
   }, [userId]);
 
-  // ─── FETCH ON USERID CHANGE ───
   useEffect(() => {
-    if (userId) {
-      fetchData();
-    }
+    if (userId) fetchData();
   }, [userId, fetchData]);
 
   // ─── SCROLL TO BOTTOM ───
@@ -312,7 +382,7 @@ export default function Dashboard() {
     [userId]
   );
 
-  // ─── HANDLE ACTION ───
+  // ─── HANDLE ACTION (FIXED: Proper metrics extraction) ───
   const handleAction = async (
     directPrompt?: string,
     forceLive: boolean = false,
@@ -352,7 +422,7 @@ export default function Dashboard() {
     try {
       const transmissionPayload = {
         propertyType: property || "Unknown Asset",
-        price: price || "$0",
+        price: price || "AED 0",
         location: location || "Unknown Location",
         message: input,
         userId: userId,
@@ -362,7 +432,7 @@ export default function Dashboard() {
         baths: baths
       };
 
-      console.log("[AUDIT] Sending payload:", transmissionPayload);
+      console.log("[AUDIT] Sending:", transmissionPayload);
 
       const response = await fetch("/api/audit", {
         method: "POST",
@@ -380,9 +450,14 @@ export default function Dashboard() {
         setStatus("ANALYSIS_VERIFIED");
         addLog("FORENSIC_AUDIT_COMPLETE");
 
+        // FIXED: Extract metrics properly with N/A handling
         const metrics = responseData?.telemetryMetrics || {};
-        const safeScore = parseFloat(metrics.systemScoreOverride) || 0;
-        const safeVariance = parseFloat(metrics.variance) || 0;
+        
+        // Handle N/A scores
+        const safeScore = metrics.systemScoreOverride === 'N/A' ? 'N/A' : 
+                          parseFloat(metrics.systemScoreOverride) || 0;
+        const safeVariance = metrics.variance === 'N/A' ? 'N/A' : 
+                             parseFloat(metrics.variance) || 0;
         const safeYield = parseFloat(metrics.projectedYield) || 0;
 
         setScoreState(safeScore);
@@ -391,14 +466,17 @@ export default function Dashboard() {
         setVerdictState(metrics.verdict || "HOLD");
         setLastStamp(metrics.verdict || "HOLD");
 
-        if (safeScore <= 3.0 || metrics.verdict === "REJECT") {
+        // NEW: Data origin tracking
+        setDataOrigin(responseData.dataOrigin || null);
+        setHasRealData(responseData.hasRealData || false);
+
+        // Fault detection
+        if ((safeScore !== 'N/A' && safeScore <= 3.0) || metrics.verdict === "REJECT") {
           setIsFaultActive(true);
           addLog("CRITICAL_RISK_GEOMETRY_DETECTED");
         }
 
-        // ─── REFETCH DATA FOR METRICS ───
         await fetchData();
-        
       } else {
         throw new Error(responseData.error || "SERVER_ERROR");
       }
@@ -412,15 +490,17 @@ export default function Dashboard() {
     }
   };
 
-  // ─── FORMAT VARIANCE ───
-  const formatVariance = (val: number) => {
-    if (val === 0) return "0.0%";
-    if (Math.abs(val) > 999) return val > 0 ? "+999.9%" : "-999.9%";
-    return `${val > 0 ? "+" : ""}${val.toFixed(1)}%`;
+  // ─── FORMAT VARIANCE (FIXED: Handle N/A) ───
+  const formatVariance = (val: number | string) => {
+    if (val === "N/A" || val === null || val === undefined) return "N/A";
+    const num = parseFloat(val as string);
+    if (isNaN(num)) return "N/A";
+    if (Math.abs(num) > 999) return num > 0 ? "+999.9%" : "-999.9%";
+    return `${num > 0 ? "+" : ""}${num.toFixed(1)}%`;
   };
 
-  // ─── CALCULATE EVIDENCE POINTS ───
-  const evidencePoints = history.length * 12 + Math.round(scoreState * 2);
+  // ─── CALCULATE EVIDENCE POINTS (FIXED: Real data based) ───
+  const evidencePoints = hasRealData ? (dataOrigin?.sourcesCount || 0) * 12 + Math.round((scoreState !== 'N/A' ? scoreState as number : 0) * 2) : 0;
 
   if (!mounted) {
     return (
@@ -565,13 +645,14 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Metrics Bar — FIXED: Dynamic values */}
+        {/* Metrics Bar — FIXED: Dynamic + N/A handling */}
         <div className="grid grid-cols-4 border-b border-[#111111] bg-[#0A0A0A] shrink-0">
           <MetricCounter 
             label="Evidence Points" 
             value={evidencePoints} 
             suffix="pts" 
             color="#E8E4D9" 
+            isNA={!hasRealData}
           />
           <MetricCounter 
             label="Acquisition Targets" 
@@ -583,13 +664,19 @@ export default function Dashboard() {
             label="Forensic Score" 
             value={scoreState} 
             suffix="/10" 
-            color={scoreState >= 7 ? "#00C853" : scoreState >= 4 ? "#FFB800" : "#FF2200"} 
+            color={
+              scoreState === 'N/A' ? "#FFB800" : typeof scoreState === 'number' && scoreState >= 7 ? "#00C853" : typeof scoreState === 'number' && scoreState >= 4 ? "#FFB800" : "#FF2200"
+            } 
+            isNA={scoreState === 'N/A'} 
           />
           <MetricCounter 
             label="Variance Delta" 
-            value={formatVariance(varianceState)} 
+            value={varianceState} 
             suffix="" 
-            color={varianceState < 0 ? "#FF2200" : varianceState > 0 ? "#00C853" : "#E8E4D9"} 
+            color={
+              varianceState === 'N/A' ? "#FFB800" : typeof varianceState === 'number' && varianceState < 0 ? "#FF2200" : typeof varianceState === 'number' && varianceState > 0 ? "#00C853" : "#E8E4D9"
+            } 
+            isNA={varianceState === 'N/A'} 
           />
         </div>
 
@@ -602,9 +689,9 @@ export default function Dashboard() {
                 <EvidenceCard title="Asset Parameters" stamp={lastStamp}>
                   <div className="space-y-3">
                     {[
-                      { l: "Asset Classification", v: property, s: setProperty, p: "e.g. Single Family Residence" },
-                      { l: "Capital Valuation", v: price, s: setPrice, p: "e.g. $450,000" },
-                      { l: "Geo Coordinates", v: location, s: setLocation, p: "e.g. 702 S Hayne St, Monroe, NC" },
+                      { l: "Asset Classification", v: property, s: setProperty, p: "e.g. Villa, Apartment" },
+                      { l: "Capital Valuation", v: price, s: setPrice, p: "e.g. AED 13,199,000" },
+                      { l: "Geo Coordinates", v: location, s: setLocation, p: "e.g. Jumeirah Park, Dubai" },
                     ].map((inp, i) => (
                       <div key={i} className="space-y-1">
                         <label className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-40" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
@@ -620,7 +707,6 @@ export default function Dashboard() {
                       </div>
                     ))}
                     
-                    {/* Beds/Baths — FIXED: Number() instead of parseInt */}
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
                         <label className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-40">Beds</label>
@@ -645,6 +731,17 @@ export default function Dashboard() {
                     </div>
                   </div>
                 </EvidenceCard>
+
+                {/* NEW: Data Origin Badge in sidebar */}
+                {dataOrigin && (
+                  <div className="p-3 border border-[#111111] bg-[#111111]/30">
+                    <p className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-40 mb-2">Data Origin</p>
+                    <DataOriginBadge origin={dataOrigin} />
+                    <p className="text-[8px] opacity-30 mt-2" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
+                      {dataOrigin.fallbackReason || "Real-time analysis"}
+                    </p>
+                  </div>
+                )}
 
                 <button
                   onClick={(e) => handleAction(undefined, false, e, "AUDIT")}
@@ -698,6 +795,18 @@ export default function Dashboard() {
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 custom-scroll">
               {activeTab === "description" && (
                 <div className="max-w-4xl mx-auto space-y-6">
+                  {/* NEW: Data Origin Banner for latest analysis */}
+                  {dataOrigin && messages.length > 1 && (
+                    <div className="animate-evidence">
+                      <div className="flex justify-between items-center border-b border-[#111111] pb-3">
+                        <DataOriginBadge origin={dataOrigin} />
+                        <span className="text-xs text-gray-500 font-mono">
+                          {new Date(dataOrigin.lastUpdated).toLocaleString()}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {messages.map((m, i) => (
                     <div key={i} className={`animate-evidence ${m.role === "user" ? "ml-auto max-w-2xl" : "max-w-3xl"}`} style={{ animationDelay: `${i * 0.1}s` }}>
                       <div

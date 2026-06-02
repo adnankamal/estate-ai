@@ -4,8 +4,8 @@ export interface ScoreResult {
   score: number;
   verdict: "PRIME_ASSET" | "STANDARD" | "REJECT" | "INSUFFICIENT_DATA";
   confidence: "HIGH" | "MEDIUM" | "LOW";
-  variance: number;
-  baseline: number;
+  variance: number; // Represents variance in Price per Sqft
+  baseline: number; // Median Market Price per Sqft
   medianSold: number | null;
   reasoning: string[];
 }
@@ -23,11 +23,21 @@ export class ForensicScorer {
     target: { price: number; sqft: number; currency: string }
   ): ScoreResult {
     
-    // STRICT: Only SOLD data
-    const soldData = transactions.filter(t => t.transaction_type === "SOLD");
+    if (!target.sqft || target.sqft <= 0 || target.price <= 0) {
+      throw new Error("Invalid target parameters: price and sqft must be greater than zero.");
+    }
+
+    const targetPPSF = target.price / target.sqft;
+
+    // STRICT FILTERING: Only matching currency, transaction type, and valid area data
+    const validSoldData = transactions.filter(t => 
+      t.transaction_type === "SOLD" && 
+      t.currency === target.currency && 
+      t.sqft && t.sqft > 0 && t.price > 0
+    );
     
-    // INSUFFICIENT DATA path
-    if (soldData.length < 3) {
+    // INSUFFICIENT DATA PATH
+    if (validSoldData.length < 3) {
       return {
         score: 0,
         verdict: "INSUFFICIENT_DATA",
@@ -36,22 +46,25 @@ export class ForensicScorer {
         baseline: 0,
         medianSold: null,
         reasoning: [
-          `Only ${soldData.length} sold comparables available.`,
-          "Minimum 3 required for reliable market analysis.",
-          "Recommend: Expand search radius or wait for more data."
+          `Only ${validSoldData.length} valid currency-matched sold comparables available.`,
+          "Minimum 3 required for reliable mathematical market analysis.",
+          "Recommend: Expand search radius or verify dataset currency parameters."
         ]
       };
     }
     
-    // Calculate baseline (market median)
-    const prices = soldData.map(t => t.price);
-    const medianSold = this.calculateMedian(prices);
-    const baseline = medianSold;
+    // Normalize to Price Per Square Foot (PPSF) to ensure accurate baseline comparison
+    const ppsfValues = validSoldData.map(t => t.price / (t.sqft as number));
+    const medianPPSF = this.calculateMedian(ppsfValues);
     
-    // Variance calculation
-    const variance = ((target.price - baseline) / baseline) * 100;
+    if (medianPPSF === 0) {
+      throw new Error("Mathematical anomaly: Median market price per square foot resolved to zero.");
+    }
+
+    // Variance calculation normalized against market PPSF baseline
+    const variance = ((targetPPSF - medianPPSF) / medianPPSF) * 100;
     
-    // Deterministic scoring (no randomness)
+    // Deterministic scoring matrix
     let score: number;
     let verdict: ScoreResult["verdict"];
     
@@ -75,9 +88,9 @@ export class ForensicScorer {
       verdict = "REJECT";
     }
     
-    // Confidence based on data volume
-    const confidence = soldData.length >= 10 ? "HIGH" 
-      : soldData.length >= 5 ? "MEDIUM" 
+    // Confidence based on data density
+    const confidence = validSoldData.length >= 10 ? "HIGH" 
+      : validSoldData.length >= 5 ? "MEDIUM" 
       : "LOW";
     
     return {
@@ -85,15 +98,15 @@ export class ForensicScorer {
       verdict,
       confidence,
       variance: parseFloat(variance.toFixed(1)),
-      baseline,
-      medianSold,
+      baseline: parseFloat(medianPPSF.toFixed(2)),
+      medianSold: parseFloat(medianPPSF.toFixed(2)),
       reasoning: [
-        `Market median sold: ${target.currency} ${medianSold.toLocaleString()}`,
-        `Listed price variance: ${variance.toFixed(1)}%`,
-        `Based on ${soldData.length} comparable sales`,
-        variance > 0 ? "Listed above market median" : "Listed below market median",
-        variance <= -20 ? "Potential undervaluation opportunity" : ""
-      ].filter(Boolean)
+        `Market Median: ${target.currency} ${medianPPSF.toFixed(2)} / sqft`,
+        `Target Asset: ${target.currency} ${targetPPSF.toFixed(2)} / sqft`,
+        `Normalized variance: ${variance.toFixed(1)}%`,
+        `Analysis computed across ${validSoldData.length} validated context matches.`,
+        variance > 0 ? "Asset listed premium relative to normalized baseline." : "Asset listed discount relative to normalized baseline."
+      ]
     };
   }
   
