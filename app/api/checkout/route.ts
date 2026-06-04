@@ -8,25 +8,32 @@ if (!supabaseUrl || !supabaseServiceKey) {
   throw new Error("CRITICAL_CONFIGURATION_MISSING: Core secure keys must be initialised.");
 }
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+// Admin client strictly scoped for backend tasks
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { persistSession: false, autoRefreshToken: false }
 });
 
 export async function POST(req: Request) {
   try {
-    const { amount, propertyName } = await req.json();
+    // 1. Extract the correct data from the 'payload' wrapper
+    const rawBody = await req.json();
+    const { propertyType, price } = rawBody.payload;
 
-    if (!propertyName || typeof amount !== 'number') {
+    // 2. Convert the string price ("10000000") to a valid number
+    const numericAmount = Number(price);
+
+    // 3. Apply the strict validation check
+    if (!propertyType || isNaN(numericAmount) || numericAmount <= 0) {
       return NextResponse.json({ error: "INVALID_TRANSACTION_METRICS" }, { status: 400 });
     }
 
-    const { error: dbError } = await supabase.from("transactions").insert([
+    // 4. Map the correctly extracted variables to your database columns
+    const { error: dbError } = await supabaseAdmin.from("transactions").insert([
       {
-        property_name: propertyName,
-        amount: amount,
-        status: "completed",
-        created_at: new Date().toISOString(),
-      },
+        property_name: propertyType,
+        amount: numericAmount,
+        status: "completed"
+      }
     ]);
 
     if (dbError) {

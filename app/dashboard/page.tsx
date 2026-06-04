@@ -1,6 +1,7 @@
 "use client";
+"use client";
 
-import { createClient } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
 import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
@@ -8,13 +9,7 @@ import jsPDF from "jspdf";
 
 const ReactMarkdown: any = dynamic(() => import("react-markdown"), { ssr: false });
 const remarkGfm: any = dynamic(() => import("remark-gfm"), { ssr: false });
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
-
-// ─── DATA ORIGIN BADGE (NEW — PHASE 1) ───
+// ─── DATA ORIGIN BADGE ───
 interface DataOrigin {
   source: "LOCAL_REGISTRY" | "HYBRID_WEB_SCRAPE" | "AI_ESTIMATE" | "DEMO_MODE" | "INSUFFICIENT";
   confidence: "HIGH" | "MEDIUM" | "LOW" | "NONE";
@@ -148,7 +143,7 @@ function EvidenceCard({
   );
 }
 
-// ─── METRIC COUNTER (FIXED: Dynamic values, no static zeros) ───
+// ─── METRIC COUNTER ───
 function MetricCounter({ 
   label, 
   value, 
@@ -168,7 +163,6 @@ function MetricCounter({
   useEffect(() => {
     if (!mounted) return;
     
-    // FIXED: Handle N/A properly
     if (isNA || value === "N/A" || value === null || value === undefined) {
       setDisplay("—");
       return;
@@ -244,6 +238,23 @@ function TerminalLog({ logs }: { logs: string[] }) {
   );
 }
 
+// ─── COLOR HELPERS (FIXED: Type-safe) ───
+function getScoreColor(score: number | string): string {
+  if (score === 'N/A') return "#FFB800";
+  if (typeof score !== 'number') return "#FF2200";
+  if (score >= 7) return "#00C853";
+  if (score >= 4) return "#FFB800";
+  return "#FF2200";
+}
+
+function getVarianceColor(variance: number | string): string {
+  if (variance === 'N/A') return "#FFB800";
+  if (typeof variance !== 'number') return "#E8E4D9";
+  if (variance < 0) return "#FF2200";
+  if (variance > 0) return "#00C853";
+  return "#E8E4D9";
+}
+
 // ─── MAIN DASHBOARD ───
 export default function Dashboard() {
   const router = useRouter();
@@ -271,7 +282,7 @@ export default function Dashboard() {
   const [isFaultActive, setIsFaultActive] = useState(false);
   const [lastStamp, setLastStamp] = useState("");
 
-  // NEW: Data origin tracking
+  // Data origin tracking
   const [dataOrigin, setDataOrigin] = useState<DataOrigin | null>(null);
   const [hasRealData, setHasRealData] = useState(false);
 
@@ -382,7 +393,7 @@ export default function Dashboard() {
     [userId]
   );
 
-  // ─── HANDLE ACTION (FIXED: Proper metrics extraction) ───
+  // ─── HANDLE ACTION ───
   const handleAction = async (
     directPrompt?: string,
     forceLive: boolean = false,
@@ -450,10 +461,9 @@ export default function Dashboard() {
         setStatus("ANALYSIS_VERIFIED");
         addLog("FORENSIC_AUDIT_COMPLETE");
 
-        // FIXED: Extract metrics properly with N/A handling
+        // Extract metrics properly with N/A handling
         const metrics = responseData?.telemetryMetrics || {};
         
-        // Handle N/A scores
         const safeScore = metrics.systemScoreOverride === 'N/A' ? 'N/A' : 
                           parseFloat(metrics.systemScoreOverride) || 0;
         const safeVariance = metrics.variance === 'N/A' ? 'N/A' : 
@@ -466,7 +476,7 @@ export default function Dashboard() {
         setVerdictState(metrics.verdict || "HOLD");
         setLastStamp(metrics.verdict || "HOLD");
 
-        // NEW: Data origin tracking
+        // Data origin tracking
         setDataOrigin(responseData.dataOrigin || null);
         setHasRealData(responseData.hasRealData || false);
 
@@ -490,7 +500,7 @@ export default function Dashboard() {
     }
   };
 
-  // ─── FORMAT VARIANCE (FIXED: Handle N/A) ───
+  // ─── FORMAT VARIANCE ───
   const formatVariance = (val: number | string) => {
     if (val === "N/A" || val === null || val === undefined) return "N/A";
     const num = parseFloat(val as string);
@@ -499,7 +509,7 @@ export default function Dashboard() {
     return `${num > 0 ? "+" : ""}${num.toFixed(1)}%`;
   };
 
-  // ─── CALCULATE EVIDENCE POINTS (FIXED: Real data based) ───
+  // ─── EVIDENCE POINTS ───
   const evidencePoints = hasRealData ? (dataOrigin?.sourcesCount || 0) * 12 + Math.round((scoreState !== 'N/A' ? scoreState as number : 0) * 2) : 0;
 
   if (!mounted) {
@@ -645,7 +655,7 @@ export default function Dashboard() {
           </div>
         </header>
 
-        {/* Metrics Bar — FIXED: Dynamic + N/A handling */}
+        {/* Metrics Bar — FIXED: Type-safe color helpers */}
         <div className="grid grid-cols-4 border-b border-[#111111] bg-[#0A0A0A] shrink-0">
           <MetricCounter 
             label="Evidence Points" 
@@ -664,19 +674,15 @@ export default function Dashboard() {
             label="Forensic Score" 
             value={scoreState} 
             suffix="/10" 
-            color={
-              scoreState === 'N/A' ? "#FFB800" : typeof scoreState === 'number' && scoreState >= 7 ? "#00C853" : typeof scoreState === 'number' && scoreState >= 4 ? "#FFB800" : "#FF2200"
-            } 
-            isNA={scoreState === 'N/A'} 
+            color={getScoreColor(scoreState)} 
+            isNA={scoreState === 'N/A'}
           />
           <MetricCounter 
             label="Variance Delta" 
             value={varianceState} 
             suffix="" 
-            color={
-              varianceState === 'N/A' ? "#FFB800" : typeof varianceState === 'number' && varianceState < 0 ? "#FF2200" : typeof varianceState === 'number' && varianceState > 0 ? "#00C853" : "#E8E4D9"
-            } 
-            isNA={varianceState === 'N/A'} 
+            color={getVarianceColor(varianceState)} 
+            isNA={varianceState === 'N/A'}
           />
         </div>
 
@@ -732,7 +738,7 @@ export default function Dashboard() {
                   </div>
                 </EvidenceCard>
 
-                {/* NEW: Data Origin Badge in sidebar */}
+                {/* Data Origin Badge in sidebar */}
                 {dataOrigin && (
                   <div className="p-3 border border-[#111111] bg-[#111111]/30">
                     <p className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-40 mb-2">Data Origin</p>
@@ -795,7 +801,7 @@ export default function Dashboard() {
             <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 custom-scroll">
               {activeTab === "description" && (
                 <div className="max-w-4xl mx-auto space-y-6">
-                  {/* NEW: Data Origin Banner for latest analysis */}
+                  {/* Data Origin Banner for latest analysis */}
                   {dataOrigin && messages.length > 1 && (
                     <div className="animate-evidence">
                       <div className="flex justify-between items-center border-b border-[#111111] pb-3">
