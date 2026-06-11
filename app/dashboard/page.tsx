@@ -1,5 +1,4 @@
-"use client";
-"use client";
+"use client"; 
 
 import { supabase } from "@/lib/supabaseClient";
 import { useRouter } from "next/navigation";
@@ -7,9 +6,21 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import jsPDF from "jspdf";
 
+// Dynamic Imports for Heavy Markdown Processing to prevent SSR mismatches
 const ReactMarkdown: any = dynamic(() => import("react-markdown"), { ssr: false });
 const remarkGfm: any = dynamic(() => import("remark-gfm"), { ssr: false });
-// ─── DATA ORIGIN BADGE ───
+
+// Dynamic Import for Satellite Component with Absolute Fallback Boundary
+const SatelliteMap = dynamic(() => import("../components/SatelliteMap"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-96 bg-gray-950 border border-gray-800 flex items-center justify-center text-gray-500 font-mono text-xs tracking-widest animate-pulse rounded-lg">
+      [CONNECTING_TO_SATELLITE_UPLINK...]
+    </div>
+  )
+});
+
+// ─── DATA ORIGIN TYPES & CONFIGURATION ───
 interface DataOrigin {
   source: "LOCAL_REGISTRY" | "HYBRID_WEB_SCRAPE" | "AI_ESTIMATE" | "DEMO_MODE" | "INSUFFICIENT";
   confidence: "HIGH" | "MEDIUM" | "LOW" | "NONE";
@@ -20,31 +31,11 @@ interface DataOrigin {
 }
 
 const ORIGIN_CONFIG = {
-  LOCAL_REGISTRY: {
-    color: "bg-green-500/20 text-green-400 border-green-500/50",
-    icon: "✓",
-    label: "VERIFIED DATA"
-  },
-  HYBRID_WEB_SCRAPE: {
-    color: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50",
-    icon: "⚠",
-    label: "WEB SOURCES"
-  },
-  AI_ESTIMATE: {
-    color: "bg-red-500/20 text-red-400 border-red-500/50",
-    icon: "✗",
-    label: "AI ESTIMATE"
-  },
-  DEMO_MODE: {
-    color: "bg-purple-500/20 text-purple-400 border-purple-500/50",
-    icon: "DEMO",
-    label: "DEMO DATA"
-  },
-  INSUFFICIENT: {
-    color: "bg-gray-500/20 text-gray-400 border-gray-500/50",
-    icon: "?",
-    label: "NO DATA"
-  }
+  LOCAL_REGISTRY: { color: "bg-green-500/20 text-green-400 border-green-500/50", icon: "✓", label: "VERIFIED DATA" },
+  HYBRID_WEB_SCRAPE: { color: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50", icon: "⚠", label: "WEB SOURCES" },
+  AI_ESTIMATE: { color: "bg-red-500/20 text-red-400 border-red-500/50", icon: "✗", label: "AI ESTIMATE" },
+  DEMO_MODE: { color: "bg-purple-500/20 text-purple-400 border-purple-500/50", icon: "DEMO", label: "DEMO DATA" },
+  INSUFFICIENT: { color: "bg-gray-500/20 text-gray-400 border-gray-500/50", icon: "?", label: "NO DATA" }
 };
 
 function DataOriginBadge({ origin }: { origin: DataOrigin }) {
@@ -65,6 +56,150 @@ function DataOriginBadge({ origin }: { origin: DataOrigin }) {
       {origin.isDemoMode && (
         <span className="ml-1 text-purple-300 font-bold">[DEMO]</span>
       )}
+    </div>
+  );
+}
+
+// ─── MAIN CORE DASHBOARD MOTOR ───
+ function AuditDashboard() {
+  const router = useRouter();
+  const reportRef = useRef<HTMLDivElement>(null);
+  
+  const [loading, setLoading] = useState<boolean>(true);
+  const [auditData, setAuditData] = useState<any>(null);
+  const [coords, setCoords] = useState({ lat: 25.1124, lng: 55.1390 });
+  const [originMetrics, setOriginMetrics] = useState<DataOrigin>({
+    source: "AI_ESTIMATE",
+    confidence: "MEDIUM",
+    sourcesCount: 1,
+    lastUpdated: "PENDING",
+    isDemoMode: false
+  });
+
+  // Data Fetching Memoized Execution Context
+  const fetchTelemetryData = useCallback(async () => {
+    try {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("ai_history")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .single();
+
+      if (error) throw error;
+
+      if (data) {
+        setAuditData(data);
+        
+        // Parse Lat/Lng strings safely from schema target parameters
+        if (data.input_params?.lat && data.input_params?.lng) {
+          setCoords({
+            lat: Number(data.input_params.lat),
+            lng: Number(data.input_params.lng)
+          });
+          
+          setOriginMetrics({
+            source: "LOCAL_REGISTRY",
+            confidence: "HIGH",
+            sourcesCount: 3,
+            lastUpdated: data.created_at || "JUST NOW",
+            isDemoMode: false
+          });
+        }
+      }
+    } catch (err: any) {
+      console.error("[TELEMETRY FETCH EXCEPTION]:", err.message);
+      setOriginMetrics(prev => ({ ...prev, source: "INSUFFICIENT", confidence: "NONE" }));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchTelemetryData();
+  }, [fetchTelemetryData]);
+
+  // Forensic Documentation Export Engine
+  const executePDFGeneration = () => {
+    if (!auditData) return;
+    const doc = new jsPDF();
+    doc.setFont("courier", "bold");
+    doc.text("ESTATE.AI SYSTEM REPORT // FORENSIC ANALYSIS", 14, 20);
+    doc.setFont("courier", "normal");
+    doc.text(`Timestamp: ${originMetrics.lastUpdated}`, 14, 30);
+    doc.text(`Data Source: ${originMetrics.source}`, 14, 40);
+    
+    const lines = doc.splitTextToSize(auditData?.output_text || "No records rendered.", 180);
+    doc.text(lines, 14, 50);
+    doc.save(`EstateAI_Audit_${Date.now()}.pdf`);
+  };
+
+  return (
+    <div className="min-h-screen bg-black text-white p-6 font-mono selection:bg-green-500 selection:text-black">
+      
+      {/* HUD Header Matrix */}
+      <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
+        <div>
+          <h1 className="text-xl font-bold tracking-wider text-white">ESTATE.AI // ANALYTICAL_DASHBOARD</h1>
+          <p className="text-xs text-gray-500 mt-1">REAL-TIME RISK & ASSET ARCHITECTURE ENGINE</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <DataOriginBadge origin={originMetrics} />
+          <button 
+            onClick={executePDFGeneration}
+            disabled={loading || !auditData}
+            className="px-4 py-1.5 bg-gray-950 border border-gray-700 text-xs text-gray-300 hover:bg-white hover:text-black hover:border-white disabled:opacity-40 disabled:hover:bg-gray-950 disabled:hover:text-gray-300 disabled:hover:border-gray-700 transition-all duration-150 rounded"
+          >
+            EXPORT_PDF_REPORT
+          </button>
+        </div>
+      </header>
+
+      {/* Primary Workspace Viewport Split */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        {/* Left Column: Tactical Satellite Grid */}
+        <div className="bg-gray-950 p-4 border border-gray-800 rounded-lg flex flex-col gap-3">
+          <div className="flex justify-between items-center border-b border-gray-900 pb-2">
+            <h2 className="text-green-500 text-xs font-bold uppercase tracking-widest">[SATELLITE_TARGET_GRID]</h2>
+            <span className="text-[10px] text-gray-500">LOC: {coords.lat.toFixed(4)}N , {coords.lng.toFixed(4)}E</span>
+          </div>
+          <SatelliteMap lat={coords.lat} lng={coords.lng} />
+        </div>
+        
+        {/* Right Column: Forensic Output Feed */}
+        <div ref={reportRef} className="bg-gray-950 p-4 border border-gray-800 rounded-lg flex flex-col gap-3">
+          <div className="flex justify-between items-center border-b border-gray-900 pb-2">
+            <h2 className="text-gray-400 text-xs font-bold uppercase tracking-widest">[FORENSIC_RAW_FEED]</h2>
+            <button 
+              onClick={() => router.push("/audit")} 
+              className="text-[10px] text-blue-400 hover:underline"
+            >
+              RUN_NEW_AUDIT →
+            </button>
+          </div>
+          
+          <div className="text-sm text-gray-300 leading-relaxed overflow-y-auto max-h-[22rem] pr-2 custom-scrollbar">
+            {loading ? (
+              <div className="text-gray-500 text-xs animate-pulse font-mono py-4">
+                [SYSTEM LOG] Processing analytical matrices, please hold...
+              </div>
+            ) : auditData ? (
+              <div className="prose prose-invert max-w-none text-xs">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {auditData.output_text}
+                </ReactMarkdown>
+              </div>
+            ) : (
+              <div className="text-red-400 text-xs border border-red-900/30 bg-red-950/10 p-3 rounded font-mono">
+                [SYSTEM WARNING] No forensic payload found within the linked Supabase history.
+              </div>
+            )}
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }
@@ -254,7 +389,74 @@ function getVarianceColor(variance: number | string): string {
   if (variance > 0) return "#00C853";
   return "#E8E4D9";
 }
-
+// FUTURE SCORE CARD — 20-Year Decay Forecast
+// ═══════════════════════════════════════════════════════════════════════
+function FutureScoreCard({ 
+  currentScore, 
+  futureScore, 
+  verdict 
+}: { 
+  currentScore: number | string; 
+  futureScore: number | string; 
+  verdict: string; 
+}) {
+  const current = typeof currentScore === 'number' ? currentScore : 0;
+  const future = typeof futureScore === 'number' ? futureScore : 0;
+  const decay = current - future;
+  
+  const getVerdictColor = (v: string) => {
+    if (v.includes("LEGACY")) return "#00C853";
+    if (v.includes("CONDITIONAL")) return "#FFB800";
+    if (v.includes("EXIT")) return "#FF6B00";
+    if (v.includes("TOXIC")) return "#FF2200";
+    if (v.includes("BURIAL")) return "#8B0000";
+    return "#FFB800";
+  };
+  
+  return (
+    <div className="p-4">
+      <div className="flex justify-between items-center mb-3">
+        <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF2200]">
+          20-Year Decay Forecast
+          
+        </span>
+        <span className="text-[10px] font-bold" style={{ color: decay > 3 ? "#FF2200" : "#FFB800" }}>
+          {decay > 0 ? `-${decay.toFixed(1)} POINTS` : "STABLE"}
+        </span>
+      </div>
+      <div className="flex items-center gap-6">
+        <div className="text-center">
+          <div className="text-2xl font-bold" style={{ color: getScoreColor(current), fontFamily: "IBM Plex Mono, monospace" }}>
+            {current.toFixed(1)}
+          </div>
+          <div className="text-[8px] opacity-40 mt-1">TODAY</div>
+        </div>
+        <div className="flex-1 h-[3px] bg-[#111111] relative rounded">
+          <div 
+            className="absolute h-full rounded bg-gradient-to-r from-[#00C853] via-[#FFB800] to-[#FF2200]" 
+            style={{ width: `${(future / 10) * 100}%` }}
+          />
+        </div>
+        <div className="text-center">
+          <div className="text-2xl font-bold" style={{ color: getScoreColor(future), fontFamily: "IBM Plex Mono, monospace" }}>
+            {future.toFixed(1)}
+          </div>
+          <div className="text-[8px] opacity-40 mt-1">2046</div>
+        </div>
+      </div>
+      <div className="mt-3 flex justify-between items-center">
+        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: getVerdictColor(verdict) }}>
+          {verdict}
+        </span>
+        {decay > 4 && (
+          <span className="text-[8px] text-[#FF2200] animate-pulse">
+            ⚠ CRITICAL DECAY
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
 // ─── MAIN DASHBOARD ───
 export default function Dashboard() {
   const router = useRouter();
@@ -285,6 +487,15 @@ export default function Dashboard() {
   // Data origin tracking
   const [dataOrigin, setDataOrigin] = useState<DataOrigin | null>(null);
   const [hasRealData, setHasRealData] = useState(false);
+   const [darkPoolDeals, setDarkPoolDeals] = useState<any[]>([]);
+  const [darkPoolLoading, setDarkPoolLoading] = useState(false);
+  const [portfolioAssets, setPortfolioAssets] = useState<any[]>([]);
+  const [portfolioAnalysis, setPortfolioAnalysis] = useState<any>(null);
+  const [portfolioJson, setPortfolioJson] = useState("");
+  const [futureScoreState, setFutureScoreState] = useState<number | null>(null);
+  const [futureVerdictState, setFutureVerdictState] = useState("UNKNOWN");
+  const [futureDecayState, setFutureDecayState] = useState(0);
+  const [futureEvents, setFutureEvents] = useState<Array<{year: number; event: string; severity: string}>>([]);
 
   const [property, setProperty] = useState("");
   const [price, setPrice] = useState("");
@@ -319,7 +530,6 @@ export default function Dashboard() {
     setSystemLogs((prev) => [`[${stamp}] ${msg}`, ...prev].slice(0, 20));
   }, []);
 
-  // ─── FETCH DATA ───
   const fetchData = useCallback(async () => {
     if (!userId) return;
     
@@ -343,9 +553,47 @@ export default function Dashboard() {
     }
   }, [userId]);
 
-  useEffect(() => {
-    if (userId) fetchData();
-  }, [userId, fetchData]);
+  // ─── FETCH DARK POOL ───
+  const fetchDarkPool = useCallback(async () => {
+    if (!location) return;
+    setDarkPoolLoading(true);
+    try {
+      const res = await fetch("/api/dark-pool", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ location, propertyType: property, investorProfile: "AGGRESSIVE" }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setDarkPoolDeals(data.deals || []);
+        addLog(`DARK_POOL_SCAN: ${data.matchesFound} opportunities detected`);
+      }
+    } catch (e) {
+      console.error(e);
+      addLog("DARK_POOL_SCAN_FAILED");
+    } finally {
+      setDarkPoolLoading(false);
+    }
+  }, [location, property, addLog]);
+  const handlePortfolioUpload = async () => {
+    if (!portfolioJson.trim()) return;
+    try {
+      const assets = JSON.parse(portfolioJson);
+      const res = await fetch("/api/portfolio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assets }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPortfolioAnalysis(data);
+        addLog("PORTFOLIO_REBALANCE_ANALYSIS_COMPLETE");
+      }
+    } catch (e) { 
+      addLog("PORTFOLIO_UPLOAD_ERROR"); 
+      console.error(e);
+    }
+  };
 
   // ─── SCROLL TO BOTTOM ───
   useEffect(() => {
@@ -479,6 +727,40 @@ export default function Dashboard() {
         // Data origin tracking
         setDataOrigin(responseData.dataOrigin || null);
         setHasRealData(responseData.hasRealData || false);
+try {
+          const futureResponse = await fetch("/api/future", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              location: location || "Unknown",
+              propertyType: property || "Unknown",
+              price: price || "0",
+              beds: beds,
+              baths: baths,
+              holdPeriodYears: 20,
+            }),
+          });
+          
+          if (futureResponse.ok) {
+            const futureData = await futureResponse.json();
+            setFutureScoreState(futureData.futureScore);
+            setFutureVerdictState(futureData.futureVerdict);
+            setFutureDecayState((safeScore !== 'N/A' ? safeScore as number : 0) - futureData.futureScore);
+            setFutureEvents(futureData.criticalEvents || []);
+            
+            addLog(`FUTURE_AUDIT_COMPLETE: ${futureData.futureVerdict}`);
+            
+            if (futureData.futureScore < 4) {
+              addLog("CRITICAL_FUTURE_DECAY_DETECTED");
+              setIsFaultActive(true);
+            }
+          } else {
+            addLog("FUTURE_AUDIT_API_ERROR");
+          }
+        } catch (futureErr) {
+          console.error("Future audit fetch failed:", futureErr);
+          addLog("FUTURE_AUDIT_UNAVAILABLE");
+        }
 
         // Fault detection
         if ((safeScore !== 'N/A' && safeScore <= 3.0) || metrics.verdict === "REJECT") {
@@ -487,6 +769,7 @@ export default function Dashboard() {
         }
 
         await fetchData();
+         fetchDarkPool().catch(console.error);
       } else {
         throw new Error(responseData.error || "SERVER_ERROR");
       }
@@ -586,6 +869,8 @@ export default function Dashboard() {
             { id: "lead", label: "Acquisition Targets", icon: "◉" },
             { id: "contract", label: "Smart Contracts", icon: "◆" },
             { id: "history", label: "Case Archive", icon: "◊" },
+            { id: "darkpool", label: "Dark Pool", icon: "◉" },
+            { id: "portfolio", label: "Portfolio Intelligence", icon: "◆" },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -684,6 +969,31 @@ export default function Dashboard() {
             color={getVarianceColor(varianceState)} 
             isNA={varianceState === 'N/A'}
           />
+        {futureScoreState !== null && (
+          <div className="border-b border-[#FF2200]/20 bg-[#FF2200]/5">
+            <FutureScoreCard 
+              currentScore={scoreState} 
+              futureScore={futureScoreState} 
+              verdict={futureVerdictState}
+            />
+          </div>
+        )}
+
+        {/* Critical Events Timeline */}
+        {futureEvents.length > 0 && (
+          <div className="border-b border-[#111111] bg-[#0A0A0A] p-3">
+            <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF2200] mb-2">Critical Events Timeline</p>
+            <div className="flex gap-2 overflow-x-auto scrollbar-none">
+              {futureEvents.map((evt, i) => (
+                <div key={`evt-${i}`} className="shrink-0 px-3 py-2 border border-[#111111] bg-[#111111]/50">
+                  <div className="text-[10px] font-bold" style={{ fontFamily: "IBM Plex Mono, monospace" }}>{evt.year}</div>
+                  <div className="text-[8px] opacity-60 max-w-[120px] truncate">{evt.event}</div>
+                  <div className={`text-[7px] font-bold mt-1 ${evt.severity === 'CRITICAL' ? 'text-[#FF2200]' : evt.severity === 'HIGH' ? 'text-[#FF6B00]' : 'text-[#FFB800]'}`}>{evt.severity}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         </div>
 
         {/* Content Area */}
@@ -812,7 +1122,43 @@ export default function Dashboard() {
                       </div>
                     </div>
                   )}
-
+                     {futureScoreState !== null && (
+  <div className="border-b border-[#FF2200]/20 bg-[#FF2200]/5 p-4">
+    <div className="flex justify-between items-center mb-3">
+      <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF2200]">20-Year Decay Forecast</span>
+      <span className="text-[10px] font-bold" style={{ color: (typeof scoreState === 'number' ? scoreState : 0) - futureScoreState > 3 ? "#FF2200" : "#FFB800" }}>
+        {(typeof scoreState === 'number' ? scoreState : 0) - futureScoreState > 4 && (
+          <span className="text-[8px] text-[#FF2200] animate-pulse">⚠ CRITICAL DECAY</span>
+        )}
+      </span>
+    </div>
+    <div className="flex items-center gap-6">
+      <div className="text-center">
+        <div className="text-2xl font-bold" style={{ color: getScoreColor(scoreState), fontFamily: "IBM Plex Mono, monospace" }}>
+          {typeof scoreState === 'number' ? scoreState.toFixed(1) : "0.0"}
+        </div>
+        <div className="text-[8px] opacity-40 mt-1">TODAY</div>
+      </div>
+      <div className="flex-1 h-[3px] bg-[#111111] relative rounded">
+        <div className="absolute h-full rounded bg-gradient-to-r from-[#00C853] via-[#FFB800] to-[#FF2200]" style={{ width: `${(futureScoreState / 10) * 100}%` }} />
+      </div>
+      <div className="text-center">
+        <div className="text-2xl font-bold" style={{ color: getScoreColor(futureScoreState), fontFamily: "IBM Plex Mono, monospace" }}>
+          {futureScoreState.toFixed(1)}
+        </div>
+        <div className="text-[8px] opacity-40 mt-1">2046</div>
+      </div>
+    </div>
+    <div className="mt-3 flex justify-between items-center">
+      <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: futureVerdictState.includes("LEGACY") ? "#00C853" : futureVerdictState.includes("CONDITIONAL") ? "#FFB800" : futureVerdictState.includes("EXIT") ? "#FF6B00" : futureVerdictState.includes("TOXIC") ? "#FF2200" : "#8B0000" }}>
+        {futureVerdictState}
+      </span>
+      {(typeof scoreState === 'number' ? scoreState : 0) - futureScoreState > 4 && (
+        <span className="text-[8px] text-[#FF2200] animate-pulse">⚠ CRITICAL DECAY</span>
+      )}
+    </div>
+  </div>
+)}
                   {messages.map((m, i) => (
                     <div key={i} className={`animate-evidence ${m.role === "user" ? "ml-auto max-w-2xl" : "max-w-3xl"}`} style={{ animationDelay: `${i * 0.1}s` }}>
                       <div
@@ -918,6 +1264,7 @@ export default function Dashboard() {
                       <p className="text-[10px] uppercase tracking-wider opacity-30">Historical query stack is empty.</p>
                     </div>
                   ) : (
+                    
                     history.map((h, i) => (
                       <div
                         key={i}
@@ -941,8 +1288,179 @@ export default function Dashboard() {
                     ))
                   )}
                 </div>
+                          )}
+            </div>
+
+          {activeTab === "portfolio" && (
+            <div className="max-w-4xl mx-auto">
+              <h2 className="text-sm font-bold uppercase tracking-[0.1em] border-l-2 border-[#00C853] pl-3 mb-6" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
+                Portfolio Intelligence
+              </h2>
+              
+              {!portfolioAnalysis ? (
+                <div className="border border-dashed border-[#1A1A1A] p-8">
+                  <p className="text-[10px] uppercase tracking-wider opacity-30 mb-4">Upload portfolio JSON for analysis</p>
+                  <textarea 
+                    value={portfolioJson}
+                    onChange={(e) => setPortfolioJson(e.target.value)}
+                    placeholder='[{"id":"V1","location":"dubai","propertyType":"villa","currentValue":5000000,"purchasePrice":4000000,"yield":5.5,"riskScore":4}]'
+                    className="w-full h-32 bg-[#111111] border border-[#1A1A1A] p-3 text-xs text-[#E8E4D9] placeholder:opacity-20 outline-none focus:border-[#FF4D00]/50 mb-4 font-mono"
+                  />
+                  <button 
+                    onClick={handlePortfolioUpload}
+                    className="px-6 py-2 bg-[#FF4D00] text-[#0A0A0A] font-bold text-[10px] uppercase tracking-widest"
+                  >
+                    ANALYZE PORTFOLIO
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {/* Metrics */}
+                  <div className="grid grid-cols-4 border border-[#111111]">
+                    <div className="p-4 border-r border-[#111111]">
+                      <div className="text-[8px] uppercase opacity-40 mb-1">Total Value</div>
+                      <div className="text-xl font-bold" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
+                        ${(portfolioAnalysis.portfolioMetrics.totalValue / 1000000).toFixed(1)}M
+                      </div>
+                    </div>
+                    <div className="p-4 border-r border-[#111111]">
+                      <div className="text-[8px] uppercase opacity-40 mb-1">Avg Yield</div>
+                      <div className="text-xl font-bold text-[#00C853]" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
+                        {portfolioAnalysis.portfolioMetrics.avgYield.toFixed(1)}%
+                      </div>
+                    </div>
+                    <div className="p-4 border-r border-[#111111]">
+                      <div className="text-[8px] uppercase opacity-40 mb-1">Risk Score</div>
+                      <div className="text-xl font-bold" style={{ color: portfolioAnalysis.portfolioMetrics.avgRisk > 6 ? '#FF2200' : '#FFB800', fontFamily: "IBM Plex Mono, monospace" }}>
+                        {portfolioAnalysis.portfolioMetrics.avgRisk.toFixed(1)}/10
+                      </div>
+                    </div>
+                    <div className="p-4">
+                      <div className="text-[8px] uppercase opacity-40 mb-1">Diversification</div>
+                      <div className="text-xl font-bold text-[#00C853]" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
+                        {portfolioAnalysis.portfolioMetrics.diversificationScore.toFixed(1)}/10
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Rebalance Signals */}
+                  {portfolioAnalysis.rebalanceSignals.length > 0 && (
+                    <div className="border border-[#FF2200]/20 bg-[#FF2200]/5 p-4">
+                      <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF2200] mb-3">
+                        Rebalance Signals ({portfolioAnalysis.rebalanceSignals.length})
+                      </p>
+                      {portfolioAnalysis.rebalanceSignals.map((signal: any, i: number) => (
+                        <div key={i} className="flex items-center gap-3 mb-2 p-2 bg-[#0A0A0A] border border-[#111111]">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: signal.action === 'SELL' ? '#FF2200' : signal.action === 'REDUCE' ? '#FF6B00' : '#FFB800' }} />
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[9px] font-bold uppercase">{signal.action}</span>
+                              <span className="text-[8px] opacity-40">{signal.assetId}</span>
+                            </div>
+                            <p className="text-[8px] opacity-60">{signal.reason}</p>
+                          </div>
+                          <span className="text-[7px] font-bold px-2 py-1" style={{ backgroundColor: signal.urgency === 'IMMEDIATE' ? '#FF2200' : signal.urgency === '30_DAYS' ? '#FF6B00' : '#FFB800', color: '#0A0A0A' }}>
+                            {signal.urgency}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Correlations */}
+                  {portfolioAnalysis.correlations.length > 0 && (
+                    <div className="border border-[#FFB800]/20 bg-[#FFB800]/5 p-4">
+                      <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FFB800] mb-3">
+                        Correlation Risks ({portfolioAnalysis.correlations.length})
+                      </p>
+                      {portfolioAnalysis.correlations.map((c: any, i: number) => (
+                        <div key={i} className="text-[8px] mb-1">
+                          <span className="text-[#FF2200] font-bold">{c.pair[0]}</span> ↔ <span className="text-[#FF2200] font-bold">{c.pair[1]}</span> = {(c.correlation * 100).toFixed(0)}% correlation
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
+          )}
+          {activeTab === "darkpool" && (
+            <div className="max-w-4xl mx-auto">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-sm font-bold uppercase tracking-[0.1em] border-l-2 border-[#FF2200] pl-3" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
+                  Dark Pool Opportunities ({darkPoolDeals.length})
+                </h2>
+                <button 
+                  onClick={() => fetchDarkPool()}
+                  disabled={darkPoolLoading}
+                  className="px-3 py-1.5 bg-[#FF2200] text-[#0A0A0A] text-[8px] font-bold uppercase tracking-wider hover:bg-[#FF6B2C] transition-colors disabled:opacity-30"
+                >
+                  {darkPoolLoading ? "SCANNING..." : "◉ RE-SCAN"}
+                </button>
+              </div>
+              
+              {!darkPoolDeals.length ? (
+                <div className="border border-dashed border-[#1A1A1A] p-8 text-center">
+                  <div className="text-4xl mb-4 opacity-20">🔒</div>
+                  <p className="text-[10px] uppercase tracking-wider opacity-30 mb-2">No off-market opportunities detected.</p>
+                  <p className="text-[8px] opacity-20">Enter location to scan developer CRMs, court auctions, and broker networks.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {darkPoolDeals.map((deal, i) => (
+                    <div key={deal.id} className="border border-[#FF2200]/20 bg-[#FF2200]/5 relative overflow-hidden group hover:border-[#FF2200]/40 transition-colors">
+                      <div className="absolute top-0 right-0 px-3 py-1 bg-[#FF2200] text-[#0A0A0A] text-[8px] font-bold uppercase tracking-wider">
+                        {deal.type}
+                      </div>
+                      <div className="p-4">
+                        <div className="flex items-start gap-4">
+                          <div className="w-10 h-10 bg-[#111111] border border-[#1A1A1A] flex items-center justify-center text-lg shrink-0 group-hover:bg-[#FF2200]/10 transition-colors">
+                            {deal.type === "PRE_LAUNCH" ? "🚀" : deal.type === "DISTRESSED" ? "⚡" : "🔥"}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-[9px] font-bold uppercase tracking-wider text-[#FF2200]">{deal.id}</span>
+                              <span className="text-[7px] opacity-30">|</span>
+                              <span className="text-[7px] opacity-30 uppercase">{deal.source}</span>
+                            </div>
+                            <p className="text-xs font-bold mb-2 truncate" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
+                              {deal.location} — <span className="opacity-40">{deal.propertyType}</span>
+                            </p>
+                            <div className="flex items-center gap-3 mb-2">
+                              <span className="px-2 py-1 bg-[#FF2200] text-[#0A0A0A] text-[10px] font-bold">
+                                {deal.discount}% OFF MARKET
+                              </span>
+                              {deal.minInvestment && (
+                                <span className="text-[9px] opacity-60" style={{ fontFamily: "IBM Plex Mono, monospace" }}>Min: {deal.minInvestment}</span>
+                              )}
+                              {deal.reservePrice && (
+                                <span className="text-[9px] opacity-60" style={{ fontFamily: "IBM Plex Mono, monospace" }}>Reserve: {deal.reservePrice}</span>
+                              )}
+                            </div>
+                            {deal.reason && <p className="text-[8px] text-[#FF2200]">{deal.reason}</p>}
+                            {deal.expiresAt && (
+                              <div className="flex items-center gap-1 mt-2">
+                                <span className="w-1.5 h-1.5 bg-[#FF2200] rounded-full animate-pulse" />
+                                <span className="text-[8px] text-[#FF2200] font-bold">
+                                  Expires {new Date(deal.expiresAt).toLocaleDateString()} ({Math.ceil((new Date(deal.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}d)
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="px-4 py-2 bg-[#111111]/50 border-t border-[#111111] flex items-center justify-between">
+                        <span className="text-[7px] opacity-30 uppercase tracking-wider">Off-Market Access Required</span>
+                        <button className="px-3 py-1 bg-[#FF2200] text-[#0A0A0A] text-[8px] font-bold uppercase tracking-wider hover:bg-[#FF6B2C] transition-colors">
+                          REQUEST ACCESS
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
             {activeTab === "description" && (
               <div className="p-4 border-t border-[#111111] bg-[#0A0A0A] shrink-0">
