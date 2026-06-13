@@ -1,26 +1,291 @@
-"use client"; 
-
-import { supabase } from "@/lib/supabaseClient";
-import { useRouter } from "next/navigation";
+"use client";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
+import { supabase } from "../../lib/supabaseClient"; 
 import jsPDF from "jspdf";
 
-// Dynamic Imports for Heavy Markdown Processing to prevent SSR mismatches
+
 const ReactMarkdown: any = dynamic(() => import("react-markdown"), { ssr: false });
 const remarkGfm: any = dynamic(() => import("remark-gfm"), { ssr: false });
 
-// Dynamic Import for Satellite Component with Absolute Fallback Boundary
 const SatelliteMap = dynamic(() => import("../components/SatelliteMap"), {
   ssr: false,
   loading: () => (
-    <div className="w-full h-96 bg-gray-950 border border-gray-800 flex items-center justify-center text-gray-500 font-mono text-xs tracking-widest animate-pulse rounded-lg">
+    <div className="w-full h-96 flex items-center justify-center text-xs tracking-widest animate-pulse"
+      style={{ background: "rgba(0,0,0,0.5)", border: "1px solid rgba(0,255,163,0.1)", borderRadius: 8, color: "rgba(0,255,163,0.4)", fontFamily: "monospace" }}>
       [CONNECTING_TO_SATELLITE_UPLINK...]
     </div>
-  )
+  ),
 });
 
-// ─── DATA ORIGIN TYPES & CONFIGURATION ───
+// ─── GLOBAL STYLES ───────────────────────────────────────────────────────────
+const GLOBAL_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,wght@0,400;1,400&family=Inter:wght@400;600&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  :root {
+    --bg:        #03050E;
+    --bg2:       #060D1A;
+    --bg3:       #0A1120;
+    --border:    rgba(0,255,163,0.10);
+    --border-md: rgba(0,255,163,0.20);
+    --border-hi: rgba(0,255,163,0.45);
+    --em:        #00FFA3;
+    --em-dim:    rgba(0,255,163,0.35);
+    --em-glow:   rgba(0,255,163,0.15);
+    --danger:    #FF4D2E;
+    --warn:      #FFB800;
+    --ok:        #00C853;
+    --text:      #D6F0E4;
+    --text-dim:  rgba(214,240,228,0.45);
+    --text-faint:rgba(214,240,228,0.22);
+    --mono:      'IBM Plex Mono', monospace;
+    --display:   'Space Grotesk', sans-serif;
+    --serif:     'Newsreader', serif;
+  }
+
+  @keyframes aurora-drift-a {
+    0%,100% { transform: translate(0,0) scale(1); }
+    50%      { transform: translate(40px,-25px) scale(1.06); }
+  }
+  @keyframes aurora-drift-b {
+    0%,100% { transform: translate(0,0) scale(1); }
+    50%      { transform: translate(-45px,30px) scale(1.04); }
+  }
+  @keyframes aurora-drift-c {
+    0%,100% { transform: translate(0,0); }
+    50%      { transform: translate(25px,18px); }
+  }
+  @keyframes scan-sweep {
+    0%   { top:0%;   opacity: 0.55; }
+    60%  { top:100%; opacity: 0.2;  }
+    100% { top:0%;   opacity: 0;    }
+  }
+  @keyframes cursor-blink {
+    0%,49%  { opacity: 1; }
+    50%,100%{ opacity: 0; }
+  }
+  @keyframes stamp-in {
+    0%   { transform: scale(2.2) rotate(-12deg); opacity: 0; }
+    100% { transform: scale(1)   rotate(-12deg); opacity: 0.85; }
+  }
+  @keyframes fadeup {
+    from { opacity:0; transform:translateY(10px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  @keyframes card-appear {
+    from { opacity:0; transform:translateY(18px) scale(0.97); }
+    to   { opacity:1; transform:translateY(0)    scale(1);    }
+  }
+  @keyframes ring-pulse {
+    0%,100% { transform:scale(1);    opacity:.3; }
+    50%     { transform:scale(1.09); opacity:.08; }
+  }
+  @keyframes dot-pulse {
+    0%,100% { box-shadow: 0 0 5px var(--em); }
+    50%     { box-shadow: 0 0 14px var(--em); }
+  }
+  @keyframes metric-count {
+    from { transform:translateY(6px); opacity:0; }
+    to   { transform:translateY(0);   opacity:1; }
+  }
+  @keyframes border-flow {
+    0%   { border-color: var(--border); }
+    50%  { border-color: var(--border-md); }
+    100% { border-color: var(--border); }
+  }
+
+  .ea-root { background:var(--bg); color:var(--text); font-family:'Inter',sans-serif; }
+
+  /* Grid background */
+  .ea-grid-bg {
+    background-image:
+      linear-gradient(to right,  rgba(0,255,163,0.035) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(0,255,163,0.035) 1px, transparent 1px);
+    background-size: 52px 52px;
+  }
+
+  /* Aurora orbs */
+  .ea-aurora { position:absolute; inset:0; pointer-events:none; overflow:hidden; }
+  .ea-orb {
+    position:absolute; border-radius:50%;
+    filter:blur(60px); pointer-events:none;
+  }
+  .ea-orb-a { width:420px;height:320px; top:5%;  left:8%;  background:radial-gradient(circle,rgba(0,255,163,0.07),transparent 70%); animation:aurora-drift-a 20s ease-in-out infinite; }
+  .ea-orb-b { width:360px;height:280px; bottom:5%;right:6%; background:radial-gradient(circle,rgba(0,255,163,0.055),transparent 70%); animation:aurora-drift-b 26s ease-in-out infinite; }
+  .ea-orb-c { width:240px;height:200px; top:10%; right:25%; background:radial-gradient(circle,rgba(0,207,255,0.045),transparent 70%); animation:aurora-drift-c 16s ease-in-out infinite; }
+
+  /* Hex corner brackets */
+  .ea-panel { position:relative; }
+  .ea-panel::before, .ea-panel::after,
+  .ea-panel > .ea-corner-b::before,
+  .ea-panel > .ea-corner-b::after {
+    content:''; position:absolute; width:14px; height:14px; pointer-events:none;
+    border-color: var(--em-dim); border-style:solid;
+  }
+  .ea-panel::before           { top:0;    left:0;  border-width:1.5px 0 0 1.5px; }
+  .ea-panel::after            { top:0;    right:0; border-width:1.5px 1.5px 0 0; }
+  .ea-panel > .ea-corner-b::before { bottom:0; left:0;  border-width:0 0 1.5px 1.5px; position:absolute; content:''; width:14px;height:14px; border-color:var(--em-dim); border-style:solid; pointer-events:none; }
+  .ea-panel > .ea-corner-b::after  { bottom:0; right:0; border-width:0 1.5px 1.5px 0; position:absolute; content:''; width:14px;height:14px; border-color:var(--em-dim); border-style:solid; pointer-events:none; }
+
+  /* Scan line */
+  .ea-scan-line {
+    position:absolute; left:0; right:0; height:1px;
+    background:linear-gradient(to right,transparent,var(--em) 30%,var(--em) 70%,transparent);
+    opacity:0;
+  }
+  .ea-scan-active { opacity:.45; animation:scan-sweep 2.2s ease-in-out infinite; }
+
+  /* Card glass */
+  .ea-glass {
+    background:rgba(6,13,26,0.75);
+    backdrop-filter:blur(20px);
+    -webkit-backdrop-filter:blur(20px);
+    border:1px solid var(--border);
+    border-radius:12px;
+    transition:border-color .3s, box-shadow .3s;
+  }
+  .ea-glass:hover { border-color:var(--border-md); }
+  .ea-glass-focus { border-color:var(--border-hi) !important; box-shadow:0 0 0 3px var(--em-glow); }
+
+  /* Input */
+  .ea-input {
+    width:100%; background:rgba(0,0,0,0.45);
+    border:1px solid rgba(0,255,163,0.12);
+    border-radius:7px; padding:10px 14px;
+    color:var(--em); font-family:var(--mono); font-size:12px;
+    letter-spacing:.04em; outline:none;
+    transition:border-color .25s, box-shadow .25s;
+  }
+  .ea-input::placeholder { color:rgba(0,255,163,0.2); }
+  .ea-input:focus {
+    border-color:rgba(0,255,163,0.5);
+    box-shadow:0 0 0 3px var(--em-glow), inset 0 0 16px rgba(0,255,163,0.03);
+  }
+
+  /* Buttons */
+  .ea-btn-primary {
+    background:linear-gradient(135deg,rgba(0,175,107,.9),rgba(0,255,163,.8));
+    color:var(--bg); font-family:var(--display); font-weight:700;
+    font-size:10px; letter-spacing:.2em; text-transform:uppercase;
+    border:1px solid rgba(0,255,163,.35); border-radius:7px;
+    padding:11px 18px; cursor:pointer;
+    transition:all .25s;
+    box-shadow:0 0 22px rgba(0,255,163,.18);
+  }
+  .ea-btn-primary:hover { box-shadow:0 0 38px rgba(0,255,163,.35); }
+  .ea-btn-primary:active { transform:scale(.99); }
+  .ea-btn-primary:disabled { opacity:.35; cursor:not-allowed; }
+
+  .ea-btn-ghost {
+    background:rgba(0,255,163,0.06); color:rgba(0,255,163,0.55);
+    border:1px solid var(--border); border-radius:7px;
+    font-family:var(--mono); font-size:9px; letter-spacing:.2em; text-transform:uppercase;
+    padding:8px 14px; cursor:pointer; transition:all .2s;
+  }
+  .ea-btn-ghost:hover { background:rgba(0,255,163,0.11); border-color:var(--border-md); color:var(--em); }
+  .ea-btn-ghost:disabled { opacity:.3; cursor:not-allowed; }
+
+  .ea-btn-danger {
+    background:rgba(255,77,46,0.08); color:rgba(255,77,46,0.7);
+    border:1px solid rgba(255,77,46,0.25); border-radius:7px;
+    font-family:var(--mono); font-size:9px; letter-spacing:.2em; text-transform:uppercase;
+    padding:8px 14px; cursor:pointer; transition:all .2s;
+  }
+  .ea-btn-danger:hover { background:rgba(255,77,46,0.16); color:#FF4D2E; border-color:rgba(255,77,46,.5); }
+
+  /* Labels */
+  .ea-label {
+    font-family:var(--mono); font-size:8.5px; letter-spacing:.28em;
+    text-transform:uppercase; color:var(--text-faint);
+  }
+
+  /* Sidebar nav */
+  .ea-nav-item {
+    display:flex; align-items:center; gap:10px;
+    padding:10px 14px; border-left:2px solid transparent;
+    cursor:pointer; transition:all .2s; border-radius:0 6px 6px 0;
+    font-family:var(--display); font-size:10px; font-weight:700;
+    letter-spacing:.12em; text-transform:uppercase;
+    color:var(--text-faint); width:100%; text-align:left;
+  }
+  .ea-nav-item:hover  { color:var(--text-dim); background:rgba(0,255,163,0.04); border-left-color:var(--border); }
+  .ea-nav-item.active { color:var(--em); background:rgba(0,255,163,0.07); border-left-color:var(--em); }
+  .ea-nav-icon { font-size:13px; opacity:.6; }
+
+  /* Metric cards */
+  .ea-metric {
+    display:flex; flex-direction:column; padding:14px 16px;
+    border-right:1px solid var(--border);
+    transition:background .2s; cursor:default;
+  }
+  .ea-metric:last-child { border-right:none; }
+  .ea-metric:hover { background:rgba(0,255,163,0.04); }
+  .ea-metric-value {
+    font-family:var(--mono); font-size:22px; font-weight:700;
+    line-height:1; animation:metric-count .4s ease-out;
+  }
+
+  /* Terminal log */
+  .ea-terminal-line {
+    font-family:var(--mono); font-size:8px; letter-spacing:.05em;
+    border-left:1px solid var(--border); padding:.25rem .5rem;
+    color:var(--text-faint); transition:color .2s;
+  }
+  .ea-terminal-line:hover { color:var(--text-dim); }
+  .ea-terminal-time { color:var(--em-dim); }
+
+  /* Message prose */
+  .ea-prose h3 { color:var(--text); font-family:var(--display); font-weight:700; font-size:11px; text-transform:uppercase; letter-spacing:.08em; border-left:2px solid var(--em); padding-left:.5rem; margin:1rem 0 .5rem; }
+  .ea-prose p  { color:var(--text); opacity:.7; font-family:var(--serif); font-size:12px; line-height:1.65; margin-bottom:.7rem; }
+  .ea-prose strong { color:var(--em); font-family:var(--display); font-weight:700; }
+  .ea-prose ul { list-style:none; padding-left:0; }
+  .ea-prose li { padding-left:1rem; position:relative; margin-bottom:.25rem; font-size:11px; opacity:.65; font-family:var(--mono); }
+  .ea-prose li::before { content:"▸"; position:absolute; left:0; color:var(--em); opacity:.6; }
+
+  /* Score bar */
+  .ea-score-bar { height:3px; background:rgba(0,255,163,0.1); border-radius:2px; position:relative; }
+  .ea-score-fill { position:absolute; height:100%; border-radius:2px; background:linear-gradient(to right,var(--ok),var(--warn),var(--danger)); transition:width .8s cubic-bezier(.22,1,.36,1); }
+
+  /* Signal bars */
+  .ea-signal { display:flex; align-items:flex-end; gap:3px; height:14px; }
+  .ea-signal-bar { width:4px; border-radius:2px; background:rgba(0,255,163,0.15); transition:background .3s, height .3s; }
+
+  /* Status dot */
+  .ea-dot { width:6px; height:6px; border-radius:50%; background:var(--em); animation:dot-pulse 2s ease-in-out infinite; }
+  .ea-dot-warn { background:var(--warn); }
+  .ea-dot-danger { background:var(--danger); }
+
+  /* Stamp */
+  @keyframes stamp-drop { 0%{transform:scale(2) rotate(-12deg);opacity:0} 100%{transform:scale(1) rotate(-12deg);opacity:.82} }
+  .ea-stamp-overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:50; }
+  .ea-stamp { border:3px dashed currentColor; padding:10px 22px; font-weight:700; letter-spacing:.12em; font-size:18px; text-transform:uppercase; font-family:var(--display); animation:stamp-drop .35s cubic-bezier(.34,1.56,.64,1) both; }
+
+  /* Dark pool card */
+  .ea-dp-card { border-radius:10px; overflow:hidden; transition:border-color .2s; }
+  .ea-dp-card:hover { border-color:rgba(255,77,46,0.5) !important; }
+
+  /* Scrollbar */
+  .ea-scroll::-webkit-scrollbar { width:3px; }
+  .ea-scroll::-webkit-scrollbar-track { background:transparent; }
+  .ea-scroll::-webkit-scrollbar-thumb { background:rgba(0,255,163,0.15); border-radius:2px; }
+  .ea-scroll-none::-webkit-scrollbar { display:none; }
+
+  /* Collapse animation */
+  .ea-fadeup { animation:fadeup .5s ease-out both; }
+  .ea-card-appear { animation:card-appear .55s cubic-bezier(.22,1,.36,1) both; }
+
+  /* Origin badge variants */
+  .ea-origin-verified { background:rgba(0,200,83,0.1); color:#00C853; border-color:rgba(0,200,83,0.35); }
+  .ea-origin-web      { background:rgba(255,184,0,0.1);  color:#FFB800; border-color:rgba(255,184,0,0.35); }
+  .ea-origin-ai       { background:rgba(255,77,46,0.1);  color:#FF4D2E; border-color:rgba(255,77,46,0.35); }
+  .ea-origin-demo     { background:rgba(130,80,255,0.1); color:#9B59FF; border-color:rgba(130,80,255,0.35); }
+  .ea-origin-none     { background:rgba(100,100,100,0.1);color:#888;    border-color:rgba(150,150,150,0.25); }
+`;
+
+// ─── TYPES ────────────────────────────────────────────────────────────────────
 interface DataOrigin {
   source: "LOCAL_REGISTRY" | "HYBRID_WEB_SCRAPE" | "AI_ESTIMATE" | "DEMO_MODE" | "INSUFFICIENT";
   confidence: "HIGH" | "MEDIUM" | "LOW" | "NONE";
@@ -30,231 +295,81 @@ interface DataOrigin {
   fallbackReason?: string;
 }
 
-const ORIGIN_CONFIG = {
-  LOCAL_REGISTRY: { color: "bg-green-500/20 text-green-400 border-green-500/50", icon: "✓", label: "VERIFIED DATA" },
-  HYBRID_WEB_SCRAPE: { color: "bg-yellow-500/20 text-yellow-400 border-yellow-500/50", icon: "⚠", label: "WEB SOURCES" },
-  AI_ESTIMATE: { color: "bg-red-500/20 text-red-400 border-red-500/50", icon: "✗", label: "AI ESTIMATE" },
-  DEMO_MODE: { color: "bg-purple-500/20 text-purple-400 border-purple-500/50", icon: "DEMO", label: "DEMO DATA" },
-  INSUFFICIENT: { color: "bg-gray-500/20 text-gray-400 border-gray-500/50", icon: "?", label: "NO DATA" }
+const ORIGIN_CONFIG: Record<string, { cls: string; icon: string; label: string }> = {
+  LOCAL_REGISTRY:    { cls: "ea-origin-verified", icon: "✓", label: "VERIFIED DATA" },
+  HYBRID_WEB_SCRAPE: { cls: "ea-origin-web",      icon: "⚠", label: "WEB SOURCES"  },
+  AI_ESTIMATE:       { cls: "ea-origin-ai",        icon: "✗", label: "AI ESTIMATE"  },
+  DEMO_MODE:         { cls: "ea-origin-demo",       icon: "◈", label: "DEMO DATA"   },
+  INSUFFICIENT:      { cls: "ea-origin-none",       icon: "?", label: "NO DATA"     },
 };
 
-function DataOriginBadge({ origin }: { origin: DataOrigin }) {
-  const style = ORIGIN_CONFIG[origin.source] || ORIGIN_CONFIG.INSUFFICIENT;
-  
-  return (
-    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded border ${style.color} text-xs font-mono`}>
-      <span>{style.icon}</span>
-      <span className="font-semibold">{style.label}</span>
-      <span className="opacity-60">|</span>
-      <span>{origin.confidence} CONFIDENCE</span>
-      {origin.sourcesCount > 0 && (
-        <>
-          <span className="opacity-60">|</span>
-          <span>{origin.sourcesCount} sources</span>
-        </>
-      )}
-      {origin.isDemoMode && (
-        <span className="ml-1 text-purple-300 font-bold">[DEMO]</span>
-      )}
-    </div>
-  );
-}
-
-// ─── MAIN CORE DASHBOARD MOTOR ───
- function AuditDashboard() {
-  const router = useRouter();
-  const reportRef = useRef<HTMLDivElement>(null);
-  
-  const [loading, setLoading] = useState<boolean>(true);
-  const [auditData, setAuditData] = useState<any>(null);
-  const [coords, setCoords] = useState({ lat: 25.1124, lng: 55.1390 });
-  const [originMetrics, setOriginMetrics] = useState<DataOrigin>({
-    source: "AI_ESTIMATE",
-    confidence: "MEDIUM",
-    sourcesCount: 1,
-    lastUpdated: "PENDING",
-    isDemoMode: false
-  });
-
-  // Data Fetching Memoized Execution Context
-  const fetchTelemetryData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from("ai_history")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .single();
-
-      if (error) throw error;
-
-      if (data) {
-        setAuditData(data);
-        
-        // Parse Lat/Lng strings safely from schema target parameters
-        if (data.input_params?.lat && data.input_params?.lng) {
-          setCoords({
-            lat: Number(data.input_params.lat),
-            lng: Number(data.input_params.lng)
-          });
-          
-          setOriginMetrics({
-            source: "LOCAL_REGISTRY",
-            confidence: "HIGH",
-            sourcesCount: 3,
-            lastUpdated: data.created_at || "JUST NOW",
-            isDemoMode: false
-          });
-        }
-      }
-    } catch (err: any) {
-      console.error("[TELEMETRY FETCH EXCEPTION]:", err.message);
-      setOriginMetrics(prev => ({ ...prev, source: "INSUFFICIENT", confidence: "NONE" }));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchTelemetryData();
-  }, [fetchTelemetryData]);
-
-  // Forensic Documentation Export Engine
-  const executePDFGeneration = () => {
-    if (!auditData) return;
-    const doc = new jsPDF();
-    doc.setFont("courier", "bold");
-    doc.text("ESTATE.AI SYSTEM REPORT // FORENSIC ANALYSIS", 14, 20);
-    doc.setFont("courier", "normal");
-    doc.text(`Timestamp: ${originMetrics.lastUpdated}`, 14, 30);
-    doc.text(`Data Source: ${originMetrics.source}`, 14, 40);
-    
-    const lines = doc.splitTextToSize(auditData?.output_text || "No records rendered.", 180);
-    doc.text(lines, 14, 50);
-    doc.save(`EstateAI_Audit_${Date.now()}.pdf`);
-  };
-
-  return (
-    <div className="min-h-screen bg-black text-white p-6 font-mono selection:bg-green-500 selection:text-black">
-      
-      {/* HUD Header Matrix */}
-      <header className="mb-8 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-800 pb-6">
-        <div>
-          <h1 className="text-xl font-bold tracking-wider text-white">ESTATE.AI // ANALYTICAL_DASHBOARD</h1>
-          <p className="text-xs text-gray-500 mt-1">REAL-TIME RISK & ASSET ARCHITECTURE ENGINE</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <DataOriginBadge origin={originMetrics} />
-          <button 
-            onClick={executePDFGeneration}
-            disabled={loading || !auditData}
-            className="px-4 py-1.5 bg-gray-950 border border-gray-700 text-xs text-gray-300 hover:bg-white hover:text-black hover:border-white disabled:opacity-40 disabled:hover:bg-gray-950 disabled:hover:text-gray-300 disabled:hover:border-gray-700 transition-all duration-150 rounded"
-          >
-            EXPORT_PDF_REPORT
-          </button>
-        </div>
-      </header>
-
-      {/* Primary Workspace Viewport Split */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        
-        {/* Left Column: Tactical Satellite Grid */}
-        <div className="bg-gray-950 p-4 border border-gray-800 rounded-lg flex flex-col gap-3">
-          <div className="flex justify-between items-center border-b border-gray-900 pb-2">
-            <h2 className="text-green-500 text-xs font-bold uppercase tracking-widest">[SATELLITE_TARGET_GRID]</h2>
-            <span className="text-[10px] text-gray-500">LOC: {coords.lat.toFixed(4)}N , {coords.lng.toFixed(4)}E</span>
-          </div>
-          <SatelliteMap lat={coords.lat} lng={coords.lng} />
-        </div>
-        
-        {/* Right Column: Forensic Output Feed */}
-        <div ref={reportRef} className="bg-gray-950 p-4 border border-gray-800 rounded-lg flex flex-col gap-3">
-          <div className="flex justify-between items-center border-b border-gray-900 pb-2">
-            <h2 className="text-gray-400 text-xs font-bold uppercase tracking-widest">[FORENSIC_RAW_FEED]</h2>
-            <button 
-              onClick={() => router.push("/audit")} 
-              className="text-[10px] text-blue-400 hover:underline"
-            >
-              RUN_NEW_AUDIT →
-            </button>
-          </div>
-          
-          <div className="text-sm text-gray-300 leading-relaxed overflow-y-auto max-h-[22rem] pr-2 custom-scrollbar">
-            {loading ? (
-              <div className="text-gray-500 text-xs animate-pulse font-mono py-4">
-                [SYSTEM LOG] Processing analytical matrices, please hold...
-              </div>
-            ) : auditData ? (
-              <div className="prose prose-invert max-w-none text-xs">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                  {auditData.output_text}
-                </ReactMarkdown>
-              </div>
-            ) : (
-              <div className="text-red-400 text-xs border border-red-900/30 bg-red-950/10 p-3 rounded font-mono">
-                [SYSTEM WARNING] No forensic payload found within the linked Supabase history.
-              </div>
-            )}
-          </div>
-        </div>
-
-      </div>
-    </div>
-  );
-}
-
-// ─── HYDRATION FIX ───
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
 function useClientOnly() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-  return mounted;
+  const [m, setM] = useState(false);
+  useEffect(() => setM(true), []);
+  return m;
 }
 
-// ─── STAMP OVERLAY ───
+function getScoreColor(v: number | string): string {
+  if (v === "N/A") return "#FFB800";
+  if (typeof v !== "number") return "#FF4D2E";
+  return v >= 7 ? "#00C853" : v >= 4 ? "#FFB800" : "#FF4D2E";
+}
+function getVarianceColor(v: number | string): string {
+  if (v === "N/A" || typeof v !== "number") return "#FFB800";
+  return v < 0 ? "#FF4D2E" : v > 0 ? "#00C853" : "#D6F0E4";
+}
+
+// ─── AURORA BACKGROUND ───────────────────────────────────────────────────────
+function AuroraBg() {
+  return (
+    <div className="ea-aurora ea-grid-bg" style={{ position: "fixed", inset: 0, zIndex: 0 }}>
+      <div className="ea-orb ea-orb-a" />
+      <div className="ea-orb ea-orb-b" />
+      <div className="ea-orb ea-orb-c" />
+      {/* vignette */}
+      <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse 80% 70% at 50% 50%, transparent 30%, #03050E 100%)" }} />
+    </div>
+  );
+}
+
+// ─── DATA ORIGIN BADGE ───────────────────────────────────────────────────────
+function DataOriginBadge({ origin }: { origin: DataOrigin }) {
+  const cfg = ORIGIN_CONFIG[origin.source] || ORIGIN_CONFIG.INSUFFICIENT;
+  return (
+    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-md border ${cfg.cls}`}
+      style={{ fontFamily: "var(--mono)", fontSize: 9, letterSpacing: ".18em" }}>
+      <span>{cfg.icon}</span>
+      <span style={{ fontWeight: 700 }}>{cfg.label}</span>
+      <span style={{ opacity: .4 }}>|</span>
+      <span>{origin.confidence} CONFIDENCE</span>
+      {origin.sourcesCount > 0 && <><span style={{ opacity: .4 }}>|</span><span>{origin.sourcesCount} sources</span></>}
+      {origin.isDemoMode && <span style={{ color: "#9B59FF", fontWeight: 700 }}>[DEMO]</span>}
+    </div>
+  );
+}
+
+// ─── STAMP OVERLAY ───────────────────────────────────────────────────────────
 function StampOverlay({ verdict, visible }: { verdict: string; visible: boolean }) {
   if (!visible) return null;
-  const stamps: Record<string, { text: string; color: string; rotate: string }> = {
-    PRIME_ASSET: { text: "PRIME ASSET // VERIFIED", color: "#FFB800", rotate: "-12deg" },
-    HIGH_YIELD: { text: "HIGH YIELD // CONFIRMED", color: "#00C853", rotate: "8deg" },
-    REJECT: { text: "REJECT // RISK ALERT", color: "#FF2200", rotate: "-6deg" },
-    HOLD: { text: "HOLD // PENDING REVIEW", color: "#666", rotate: "0deg" },
-    INSUFFICIENT_DATA: { text: "NO DATA // VERIFY", color: "#FF2200", rotate: "-4deg" },
+  const MAP: Record<string, { text: string; color: string }> = {
+    PRIME_ASSET:       { text: "PRIME ASSET // VERIFIED", color: "#FFB800" },
+    HIGH_YIELD:        { text: "HIGH YIELD // CONFIRMED", color: "#00C853" },
+    REJECT:            { text: "REJECT // RISK ALERT",    color: "#FF4D2E" },
+    HOLD:              { text: "HOLD // PENDING REVIEW",  color: "#888"    },
+    INSUFFICIENT_DATA: { text: "NO DATA // VERIFY",       color: "#FF4D2E" },
   };
-  const s = stamps[verdict] || stamps.HOLD;
+  const s = MAP[verdict] || MAP.HOLD;
   return (
-    <div
-      className="absolute inset-0 flex items-center justify-center pointer-events-none z-50"
-      style={{ mixBlendMode: "multiply", animation: "stamp-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1)" }}
-    >
-      <div
-        className="border-4 border-dashed px-8 py-4 font-bold tracking-widest text-2xl uppercase opacity-80"
-        style={{
-          color: s.color,
-          borderColor: s.color,
-          transform: `rotate(${s.rotate})`,
-          fontFamily: "Space Grotesk, sans-serif",
-        }}
-      >
-        {s.text}
-      </div>
+    <div className="ea-stamp-overlay">
+      <div className="ea-stamp" style={{ color: s.color, borderColor: s.color }}>{s.text}</div>
     </div>
   );
 }
 
-// ─── EVIDENCE CARD ───
-function EvidenceCard({
-  title,
-  children,
-  stamp,
-  className = "",
-}: {
-  title: string;
-  children: React.ReactNode;
-  stamp?: string;
-  className?: string;
+// ─── EVIDENCE CARD ───────────────────────────────────────────────────────────
+function EvidenceCard({ title, children, stamp, style = {} }: {
+  title: string; children: React.ReactNode; stamp?: string; style?: React.CSSProperties;
 }) {
   const [showStamp, setShowStamp] = useState(false);
   useEffect(() => {
@@ -265,199 +380,142 @@ function EvidenceCard({
     }
   }, [stamp]);
   return (
-    <div className={`relative border border-[#111111] bg-[#0A0A0A] overflow-hidden ${className}`}>
-      <div className="px-4 py-2 border-b border-[#111111] flex items-center justify-between">
-        <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-[#E8E4D9] opacity-60">
-          {title}
-        </span>
-        <div className="w-1.5 h-1.5 bg-[#FF4D00] rounded-full animate-pulse" />
+    <div className="ea-glass ea-panel ea-card-appear" style={{ overflow: "hidden", position: "relative", ...style }}>
+      <div className="ea-corner-b" />
+      {/* header */}
+      <div style={{ padding: "10px 14px 10px", borderBottom: "1px solid rgba(0,255,163,0.08)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <span className="ea-label" style={{ fontSize: 8, letterSpacing: ".22em" }}>{title}</span>
+        <div className="ea-dot" style={{ width: 5, height: 5 }} />
       </div>
-      <div className="p-4 relative">{children}</div>
+      <div style={{ padding: "14px" }}>{children}</div>
       <StampOverlay verdict={stamp || ""} visible={showStamp} />
     </div>
   );
 }
 
-// ─── METRIC COUNTER ───
-function MetricCounter({ 
-  label, 
-  value, 
-  suffix = "", 
-  color = "#E8E4D9",
-  isNA = false 
-}: { 
-  label: string; 
-  value: string | number; 
-  suffix?: string; 
-  color?: string;
-  isNA?: boolean;
+// ─── METRIC COUNTER ──────────────────────────────────────────────────────────
+function MetricCounter({ label, value, suffix = "", color = "var(--text)", isNA = false }: {
+  label: string; value: string | number; suffix?: string; color?: string; isNA?: boolean;
 }) {
   const [display, setDisplay] = useState("—");
   const mounted = useClientOnly();
-  
   useEffect(() => {
     if (!mounted) return;
-    
-    if (isNA || value === "N/A" || value === null || value === undefined) {
-      setDisplay("—");
-      return;
-    }
-    
+    if (isNA || value === "N/A" || value === null || value === undefined) { setDisplay("—"); return; }
     const target = parseFloat(value.toString().replace(/[^0-9.-]/g, "")) || 0;
-    const duration = 1200;
-    const start = performance.now();
-    const animate = (now: number) => {
-      const elapsed = now - start;
-      const progress = Math.min(elapsed / duration, 1);
-      const eased = 1 - Math.pow(1 - progress, 4);
-      const current = target * eased;
-      setDisplay(Number.isInteger(target) ? Math.round(current).toString() : current.toFixed(1));
-      if (progress < 1) requestAnimationFrame(animate);
+    const dur = 1100; const start = performance.now();
+    const run = (now: number) => {
+      const p = Math.min((now - start) / dur, 1);
+      const e = 1 - Math.pow(1 - p, 4);
+      const cur = target * e;
+      setDisplay(Number.isInteger(target) ? Math.round(cur).toString() : cur.toFixed(1));
+      if (p < 1) requestAnimationFrame(run);
     };
-    requestAnimationFrame(animate);
+    requestAnimationFrame(run);
   }, [value, mounted, isNA]);
-  
+
   return (
-    <div className="flex flex-col p-4 border-r border-[#111111] last:border-r-0 hover:bg-[#111111]/50 transition-colors duration-300 cursor-default group">
-      <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#E8E4D9] opacity-40 mb-2 group-hover:opacity-70 transition-opacity">
-        {label}
-      </span>
-      <div className="flex items-baseline gap-1">
-        <span className="text-2xl font-bold tracking-tight" style={{ 
-          color: isNA ? "#FFB800" : color, 
-          fontFamily: "IBM Plex Mono, monospace" 
-        }}>
+    <div className="ea-metric">
+      <span className="ea-label" style={{ marginBottom: 6, display: "block", fontSize: 8 }}>{label}</span>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
+        <span className="ea-metric-value" style={{ color: isNA ? "#FFB800" : color }}>
           {mounted ? display : "—"}
         </span>
         {suffix && !isNA && (
-          <span className="text-[10px] font-bold opacity-40" style={{ color, fontFamily: "IBM Plex Mono, monospace" }}>
-            {suffix}
-          </span>
+          <span style={{ fontFamily: "var(--mono)", fontSize: 9, color, opacity: .4 }}>{suffix}</span>
         )}
       </div>
     </div>
   );
 }
 
-// ─── SCAN LINE ───
-function ScanLine({ active }: { active: boolean }) {
-  if (!active) return null;
+// ─── SIGNAL BARS ─────────────────────────────────────────────────────────────
+function SignalBars({ active }: { active: boolean }) {
+  const heights = [4, 6, 9, 12];
   return (
-    <div className="absolute inset-0 pointer-events-none z-40 overflow-hidden">
-      <div 
-        className="absolute w-full h-[2px] bg-gradient-to-r from-transparent via-[#FF4D00] to-transparent"
-        style={{ animation: "scan-sweep 2.5s ease-in-out infinite" }}
-      />
+    <div className="ea-signal">
+      {heights.map((h, i) => (
+        <div key={i} className="ea-signal-bar" style={{
+          height: h,
+          background: active ? (i < 3 ? "var(--em)" : "rgba(0,255,163,0.3)") : "rgba(0,255,163,0.15)",
+          transitionDelay: active ? `${i * 55}ms` : "0ms",
+        }} />
+      ))}
     </div>
   );
 }
 
-// ─── TERMINAL LOG ───
+// ─── TERMINAL LOG ────────────────────────────────────────────────────────────
 function TerminalLog({ logs }: { logs: string[] }) {
   const mounted = useClientOnly();
-  
   return (
-    <div className="space-y-1 h-32 overflow-y-auto" style={{ scrollbarWidth: "none" }}>
+    <div className="ea-scroll-none" style={{ height: 110, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
       {logs.map((log, i) => (
-        <div
-          key={i}
-          className="text-[8px] font-mono leading-relaxed border-l border-[#111111] pl-3 py-0.5 text-[#E8E4D9] opacity-30 hover:opacity-70 transition-opacity duration-200"
-          style={{ fontFamily: "IBM Plex Mono, monospace" }}
-        >
-          <span className="text-[#FF4D00] opacity-60">
-            {mounted ? `[${new Date().toLocaleTimeString('en-US', { hour12: false })}]` : `[--:--:--]`}
-          </span> {log}
+        <div key={i} className="ea-terminal-line">
+          <span className="ea-terminal-time">
+            {mounted ? `[${new Date().toLocaleTimeString("en-US", { hour12: false })}]` : "[--:--:--]"}
+          </span>{" "}{log}
         </div>
       ))}
     </div>
   );
 }
 
-// ─── COLOR HELPERS (FIXED: Type-safe) ───
-function getScoreColor(score: number | string): string {
-  if (score === 'N/A') return "#FFB800";
-  if (typeof score !== 'number') return "#FF2200";
-  if (score >= 7) return "#00C853";
-  if (score >= 4) return "#FFB800";
-  return "#FF2200";
+// ─── SCAN LINE ───────────────────────────────────────────────────────────────
+function ScanLine({ active }: { active: boolean }) {
+  if (!active) return null;
+  return (
+    <div style={{ position: "absolute", inset: 0, pointerEvents: "none", zIndex: 40, overflow: "hidden" }}>
+      <div style={{
+        position: "absolute", left: 0, right: 0, height: 1,
+        background: "linear-gradient(to right, transparent, rgba(0,255,163,0.6) 30%, rgba(0,255,163,0.6) 70%, transparent)",
+        animation: "scan-sweep 2.2s ease-in-out infinite",
+      }} />
+    </div>
+  );
 }
 
-function getVarianceColor(variance: number | string): string {
-  if (variance === 'N/A') return "#FFB800";
-  if (typeof variance !== 'number') return "#E8E4D9";
-  if (variance < 0) return "#FF2200";
-  if (variance > 0) return "#00C853";
-  return "#E8E4D9";
-}
-// FUTURE SCORE CARD — 20-Year Decay Forecast
-// ═══════════════════════════════════════════════════════════════════════
-function FutureScoreCard({ 
-  currentScore, 
-  futureScore, 
-  verdict 
-}: { 
-  currentScore: number | string; 
-  futureScore: number | string; 
-  verdict: string; 
+// ─── FUTURE SCORE CARD ───────────────────────────────────────────────────────
+function FutureScoreCard({ currentScore, futureScore, verdict }: {
+  currentScore: number | string; futureScore: number | string; verdict: string;
 }) {
-  const current = typeof currentScore === 'number' ? currentScore : 0;
-  const future = typeof futureScore === 'number' ? futureScore : 0;
-  const decay = current - future;
-  
-  const getVerdictColor = (v: string) => {
-    if (v.includes("LEGACY")) return "#00C853";
-    if (v.includes("CONDITIONAL")) return "#FFB800";
-    if (v.includes("EXIT")) return "#FF6B00";
-    if (v.includes("TOXIC")) return "#FF2200";
-    if (v.includes("BURIAL")) return "#8B0000";
-    return "#FFB800";
-  };
-  
+  const cur = typeof currentScore === "number" ? currentScore : 0;
+  const fut = typeof futureScore === "number" ? futureScore : 0;
+  const decay = cur - fut;
+  const vCol = verdict.includes("LEGACY") ? "#00C853"
+    : verdict.includes("CONDITIONAL") ? "#FFB800"
+    : verdict.includes("EXIT")        ? "#FF6B00"
+    : verdict.includes("TOXIC")       ? "#FF4D2E" : "#8B0000";
   return (
-    <div className="p-4">
-      <div className="flex justify-between items-center mb-3">
-        <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF2200]">
-          20-Year Decay Forecast
-          
-        </span>
-        <span className="text-[10px] font-bold" style={{ color: decay > 3 ? "#FF2200" : "#FFB800" }}>
-          {decay > 0 ? `-${decay.toFixed(1)} POINTS` : "STABLE"}
+    <div style={{ padding: "14px 16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <span className="ea-label" style={{ color: "rgba(255,77,46,0.7)", fontSize: 8 }}>20-Year Decay Forecast</span>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 9, fontWeight: 700, color: decay > 3 ? "#FF4D2E" : "#FFB800" }}>
+          {decay > 0 ? `-${decay.toFixed(1)} PTS` : "STABLE"}
         </span>
       </div>
-      <div className="flex items-center gap-6">
-        <div className="text-center">
-          <div className="text-2xl font-bold" style={{ color: getScoreColor(current), fontFamily: "IBM Plex Mono, monospace" }}>
-            {current.toFixed(1)}
-          </div>
-          <div className="text-[8px] opacity-40 mt-1">TODAY</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 700, color: getScoreColor(cur) }}>{cur.toFixed(1)}</div>
+          <div className="ea-label" style={{ marginTop: 3, fontSize: 7 }}>TODAY</div>
         </div>
-        <div className="flex-1 h-[3px] bg-[#111111] relative rounded">
-          <div 
-            className="absolute h-full rounded bg-gradient-to-r from-[#00C853] via-[#FFB800] to-[#FF2200]" 
-            style={{ width: `${(future / 10) * 100}%` }}
-          />
+        <div className="ea-score-bar" style={{ flex: 1 }}>
+          <div className="ea-score-fill" style={{ width: `${(fut / 10) * 100}%` }} />
         </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold" style={{ color: getScoreColor(future), fontFamily: "IBM Plex Mono, monospace" }}>
-            {future.toFixed(1)}
-          </div>
-          <div className="text-[8px] opacity-40 mt-1">2046</div>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 700, color: getScoreColor(fut) }}>{fut.toFixed(1)}</div>
+          <div className="ea-label" style={{ marginTop: 3, fontSize: 7 }}>2046</div>
         </div>
       </div>
-      <div className="mt-3 flex justify-between items-center">
-        <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: getVerdictColor(verdict) }}>
-          {verdict}
-        </span>
-        {decay > 4 && (
-          <span className="text-[8px] text-[#FF2200] animate-pulse">
-            ⚠ CRITICAL DECAY
-          </span>
-        )}
+      <div style={{ marginTop: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontFamily: "var(--mono)", fontSize: 8.5, fontWeight: 700, letterSpacing: ".12em", textTransform: "uppercase", color: vCol }}>{verdict}</span>
+        {decay > 4 && <span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "#FF4D2E", animation: "dot-pulse 1.5s infinite" }}>⚠ CRITICAL DECAY</span>}
       </div>
     </div>
   );
 }
-// ─── MAIN DASHBOARD ───
+
+// ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function Dashboard() {
   const router = useRouter();
   const scrollRef = useRef<any>(null);
@@ -467,35 +525,31 @@ export default function Dashboard() {
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [inputFocused, setInputFocused] = useState(false);
   const [status, setStatus] = useState("SYSTEM_IDLE");
   const [chatInput, setChatInput] = useState("");
   const [history, setHistory] = useState<any[]>([]);
   const [leads, setLeads] = useState<any[]>([]);
   const [systemLogs, setSystemLogs] = useState<string[]>([
     "[INITIALIZING] Sentinel Core v3.3",
-    "[OK] Encryption Layer Verified"
+    "[OK] Encryption Layer Verified",
   ]);
 
-  // FIXED: Dynamic metrics from API response
   const [scoreState, setScoreState] = useState<number | string>(0);
   const [varianceState, setVarianceState] = useState<number | string>(0);
   const [yieldState, setYieldState] = useState<number>(0);
   const [verdictState, setVerdictState] = useState("HOLD");
   const [isFaultActive, setIsFaultActive] = useState(false);
   const [lastStamp, setLastStamp] = useState("");
-
-  // Data origin tracking
   const [dataOrigin, setDataOrigin] = useState<DataOrigin | null>(null);
   const [hasRealData, setHasRealData] = useState(false);
-   const [darkPoolDeals, setDarkPoolDeals] = useState<any[]>([]);
+  const [darkPoolDeals, setDarkPoolDeals] = useState<any[]>([]);
   const [darkPoolLoading, setDarkPoolLoading] = useState(false);
-  const [portfolioAssets, setPortfolioAssets] = useState<any[]>([]);
   const [portfolioAnalysis, setPortfolioAnalysis] = useState<any>(null);
   const [portfolioJson, setPortfolioJson] = useState("");
   const [futureScoreState, setFutureScoreState] = useState<number | null>(null);
   const [futureVerdictState, setFutureVerdictState] = useState("UNKNOWN");
-  const [futureDecayState, setFutureDecayState] = useState(0);
-  const [futureEvents, setFutureEvents] = useState<Array<{year: number; event: string; severity: string}>>([]);
+  const [futureEvents, setFutureEvents] = useState<Array<{ year: number; event: string; severity: string }>>([]);
 
   const [property, setProperty] = useState("");
   const [price, setPrice] = useState("");
@@ -504,988 +558,641 @@ export default function Dashboard() {
   const [baths, setBaths] = useState(2);
 
   const [messages, setMessages] = useState([
-    {
-      role: "assistant",
-      content: "### ESTATE AI // SENTINEL CORE\nUplink Established. Provide asset parameters for forensic investment audit.",
-    },
+    { role: "assistant", content: "### ESTATE AI // SENTINEL CORE\nUplink Established. Provide asset parameters for forensic investment audit." },
   ]);
 
-  // ─── AUTH CHECK ───
+  // auth check
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+    supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) router.push("/");
-      else {
-        setUserEmail(user.email ?? null);
-        setUserId(user.id);
-      }
-    };
-    checkUser();
+      else { setUserEmail(user.email ?? null); setUserId(user.id); }
+    });
   }, [router]);
 
-  // ─── ADD LOG ───
   const addLog = useCallback((msg: string) => {
-    const now = new Date();
-    const stamp = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setSystemLogs((prev) => [`[${stamp}] ${msg}`, ...prev].slice(0, 20));
+    const stamp = new Date().toLocaleTimeString("en-US", { hour12: false });
+    setSystemLogs((p) => [`[${stamp}] ${msg}`, ...p].slice(0, 20));
   }, []);
 
   const fetchData = useCallback(async () => {
     if (!userId) return;
-    
-    try {
-      const { data: hist } = await supabase
-        .from("ai_history")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false });
-        
-      setHistory(hist || []);
-      
-      const { data: lds } = await supabase
-        .from("leads")
-        .select("*")
-        .order("created_at", { ascending: false });
-        
-      setLeads(lds || []);
-    } catch (err) {
-      console.error("[FETCH] Error:", err);
-    }
+    const { data: hist } = await supabase.from("ai_history").select("*").eq("user_id", userId).order("created_at", { ascending: false });
+    setHistory(hist || []);
+    const { data: lds } = await supabase.from("leads").select("*").order("created_at", { ascending: false });
+    setLeads(lds || []);
   }, [userId]);
 
-  // ─── FETCH DARK POOL ───
   const fetchDarkPool = useCallback(async () => {
     if (!location) return;
     setDarkPoolLoading(true);
     try {
-      const res = await fetch("/api/dark-pool", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ location, propertyType: property, investorProfile: "AGGRESSIVE" }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDarkPoolDeals(data.deals || []);
-        addLog(`DARK_POOL_SCAN: ${data.matchesFound} opportunities detected`);
-      }
-    } catch (e) {
-      console.error(e);
-      addLog("DARK_POOL_SCAN_FAILED");
-    } finally {
-      setDarkPoolLoading(false);
-    }
+      const res = await fetch("/api/dark-pool", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location, propertyType: property, investorProfile: "AGGRESSIVE" }) });
+      if (res.ok) { const d = await res.json(); setDarkPoolDeals(d.deals || []); addLog(`DARK_POOL_SCAN: ${d.matchesFound} opportunities`); }
+    } catch { addLog("DARK_POOL_SCAN_FAILED"); } finally { setDarkPoolLoading(false); }
   }, [location, property, addLog]);
+
   const handlePortfolioUpload = async () => {
     if (!portfolioJson.trim()) return;
     try {
       const assets = JSON.parse(portfolioJson);
-      const res = await fetch("/api/portfolio", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assets }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setPortfolioAnalysis(data);
-        addLog("PORTFOLIO_REBALANCE_ANALYSIS_COMPLETE");
-      }
-    } catch (e) { 
-      addLog("PORTFOLIO_UPLOAD_ERROR"); 
-      console.error(e);
-    }
+      const res = await fetch("/api/portfolio", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ assets }) });
+      if (res.ok) { const d = await res.json(); setPortfolioAnalysis(d); addLog("PORTFOLIO_ANALYSIS_COMPLETE"); }
+    } catch { addLog("PORTFOLIO_UPLOAD_ERROR"); }
   };
 
-  // ─── SCROLL TO BOTTOM ───
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, loading]);
+  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [messages, loading]);
 
-  // ─── GENERATE PDF ───
-  const generatePDF = useCallback(
-    (content: string) => {
-      const doc = new jsPDF();
-      const docId = `AUDIT-${Math.random().toString(36).toUpperCase().substring(2, 9)}`;
+  const generatePDF = useCallback((content: string) => {
+    const doc = new jsPDF();
+    const id = `AUDIT-${Math.random().toString(36).toUpperCase().slice(2, 9)}`;
+    doc.setFillColor(3, 5, 14); doc.rect(0, 0, 210, 297, "F");
+    doc.setTextColor(214, 240, 228); doc.setFont("helvetica", "bold"); doc.setFontSize(18);
+    doc.text("ESTATE.AI // FORENSIC AUDIT REPORT", 20, 30);
+    doc.setDrawColor(0, 255, 163); doc.setLineWidth(0.6); doc.line(20, 37, 190, 37);
+    doc.setFontSize(8); doc.setTextColor(0, 255, 163);
+    doc.text(`REF: ${id}`, 20, 46); doc.text(`OPERATOR: ${userId?.slice(0, 12) || "ANON"}`, 20, 52);
+    doc.setTextColor(214, 240, 228); doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+    doc.text(doc.splitTextToSize(content, 170), 20, 65);
+    doc.save(`${id}_REPORT.pdf`);
+  }, [userId]);
 
-      doc.setFillColor(10, 10, 10);
-      doc.rect(0, 0, 210, 297, "F");
-
-      doc.setTextColor(232, 228, 217);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(22);
-      doc.text("ESTATE AI // FORENSIC AUDIT REPORT", 20, 35);
-
-      doc.setDrawColor(255, 77, 0);
-      doc.setLineWidth(0.8);
-      doc.line(20, 42, 190, 42);
-
-      doc.setFontSize(8);
-      doc.setTextColor(255, 77, 0);
-      doc.text(`DOC_REF: ${docId}`, 20, 52);
-      doc.text(`OPERATOR: ${userId?.substring(0, 12) || 'ANON'}`, 20, 58);
-      doc.text(`TIMESTAMP: ${new Date().toLocaleString()}`, 135, 52);
-
-      doc.setTextColor(232, 228, 217);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(10);
-      const splitText = doc.splitTextToSize(content, 170);
-      doc.text(splitText, 20, 75);
-
-      doc.setTextColor(255, 77, 0);
-      doc.setFontSize(7);
-      doc.text("CONFIDENTIAL FORENSIC TELEMETRY // ESTATE AI SENTINEL v3.3", 20, 285);
-
-      doc.save(`${docId}_FORENSIC_REPORT.pdf`);
-    },
-    [userId]
-  );
-
-  // ─── HANDLE ACTION ───
-  const handleAction = async (
-    directPrompt?: string,
-    forceLive: boolean = false,
-    event?: React.FormEvent | React.KeyboardEvent,
-    executionType: string = "AUDIT"
-  ) => {
+  const handleAction = async (directPrompt?: string, forceLive = false, event?: any, execType = "AUDIT") => {
     if (event) event.preventDefault();
     const input = directPrompt || chatInput;
     if (!input && !property) return;
     if (loading) return;
-
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: input || `Audit Command: ${property} | ${location} | ${price}` },
-    ]);
+    setMessages((p) => [...p, { role: "user", content: input || `Audit: ${property} | ${location} | ${price}` }]);
     setChatInput("");
     setLoading(true);
     setIsFaultActive(false);
-
-    const steps = [
-      "EVIDENCE_GATHERING",
-      "MARKET_CROSS_REF",
-      "VARIANCE_CALCULATION",
-      "YIELD_SIMULATION",
-      "FINAL_VERDICT"
-    ];
-
-    let currentStep = 0;
-    const interval = setInterval(() => {
-      if (currentStep < steps.length) {
-        setStatus(`[${currentStep + 1}/${steps.length}] ${steps[currentStep]}`);
-        addLog(`PROTOCOL_${steps[currentStep]}_INITIATED`);
-        currentStep++;
-      }
+    const steps = ["EVIDENCE_GATHERING", "MARKET_CROSS_REF", "VARIANCE_CALCULATION", "YIELD_SIMULATION", "FINAL_VERDICT"];
+    let step = 0;
+    const iv = setInterval(() => {
+      if (step < steps.length) { setStatus(`[${step + 1}/5] ${steps[step]}`); addLog(`PROTOCOL_${steps[step]}`); step++; }
     }, 1500);
-
     try {
-      const transmissionPayload = {
-        propertyType: property || "Unknown Asset",
-        price: price || "AED 0",
-        location: location || "Unknown Location",
-        message: input,
-        userId: userId,
-        forceLive: forceLive,
-        type: executionType,
-        beds: beds,
-        baths: baths
-      };
-
-      console.log("[AUDIT] Sending:", transmissionPayload);
-
-      const response = await fetch("/api/audit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ payload: transmissionPayload }),
+      const res = await fetch("/api/audit", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ payload: { propertyType: property, price, location, message: input, userId, forceLive, type: execType, beds, baths } }),
       });
-
-      const responseData = await response.json();
-      clearInterval(interval);
-
-      console.log("[AUDIT] Response:", responseData);
-
-      if (response.ok) {
-        setMessages((prev) => [...prev, { role: "assistant", content: responseData.data }]);
-        setStatus("ANALYSIS_VERIFIED");
-        addLog("FORENSIC_AUDIT_COMPLETE");
-
-        // Extract metrics properly with N/A handling
-        const metrics = responseData?.telemetryMetrics || {};
-        
-        const safeScore = metrics.systemScoreOverride === 'N/A' ? 'N/A' : 
-                          parseFloat(metrics.systemScoreOverride) || 0;
-        const safeVariance = metrics.variance === 'N/A' ? 'N/A' : 
-                             parseFloat(metrics.variance) || 0;
-        const safeYield = parseFloat(metrics.projectedYield) || 0;
-
-        setScoreState(safeScore);
-        setVarianceState(safeVariance);
-        setYieldState(safeYield);
-        setVerdictState(metrics.verdict || "HOLD");
-        setLastStamp(metrics.verdict || "HOLD");
-
-        // Data origin tracking
-        setDataOrigin(responseData.dataOrigin || null);
-        setHasRealData(responseData.hasRealData || false);
-try {
-          const futureResponse = await fetch("/api/future", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              location: location || "Unknown",
-              propertyType: property || "Unknown",
-              price: price || "0",
-              beds: beds,
-              baths: baths,
-              holdPeriodYears: 20,
-            }),
-          });
-          
-          if (futureResponse.ok) {
-            const futureData = await futureResponse.json();
-            setFutureScoreState(futureData.futureScore);
-            setFutureVerdictState(futureData.futureVerdict);
-            setFutureDecayState((safeScore !== 'N/A' ? safeScore as number : 0) - futureData.futureScore);
-            setFutureEvents(futureData.criticalEvents || []);
-            
-            addLog(`FUTURE_AUDIT_COMPLETE: ${futureData.futureVerdict}`);
-            
-            if (futureData.futureScore < 4) {
-              addLog("CRITICAL_FUTURE_DECAY_DETECTED");
-              setIsFaultActive(true);
-            }
-          } else {
-            addLog("FUTURE_AUDIT_API_ERROR");
-          }
-        } catch (futureErr) {
-          console.error("Future audit fetch failed:", futureErr);
-          addLog("FUTURE_AUDIT_UNAVAILABLE");
-        }
-
-        // Fault detection
-        if ((safeScore !== 'N/A' && safeScore <= 3.0) || metrics.verdict === "REJECT") {
-          setIsFaultActive(true);
-          addLog("CRITICAL_RISK_GEOMETRY_DETECTED");
-        }
-
-        await fetchData();
-         fetchDarkPool().catch(console.error);
-      } else {
-        throw new Error(responseData.error || "SERVER_ERROR");
-      }
+      const rd = await res.json();
+      clearInterval(iv);
+      if (res.ok) {
+        setMessages((p) => [...p, { role: "assistant", content: rd.data }]);
+        setStatus("ANALYSIS_VERIFIED"); addLog("FORENSIC_AUDIT_COMPLETE");
+        const m = rd?.telemetryMetrics || {};
+        const safeScore = m.systemScoreOverride === "N/A" ? "N/A" : parseFloat(m.systemScoreOverride) || 0;
+        const safeVar = m.variance === "N/A" ? "N/A" : parseFloat(m.variance) || 0;
+        setScoreState(safeScore); setVarianceState(safeVar); setYieldState(parseFloat(m.projectedYield) || 0);
+        setVerdictState(m.verdict || "HOLD"); setLastStamp(m.verdict || "HOLD");
+        setDataOrigin(rd.dataOrigin || null); setHasRealData(rd.hasRealData || false);
+        try {
+          const fr = await fetch("/api/future", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ location, propertyType: property, price, beds, baths, holdPeriodYears: 20 }) });
+          if (fr.ok) { const fd = await fr.json(); setFutureScoreState(fd.futureScore); setFutureVerdictState(fd.futureVerdict); setFutureEvents(fd.criticalEvents || []); addLog(`FUTURE_AUDIT: ${fd.futureVerdict}`); if (fd.futureScore < 4) setIsFaultActive(true); }
+        } catch { addLog("FUTURE_AUDIT_UNAVAILABLE"); }
+        if ((safeScore !== "N/A" && (safeScore as number) <= 3) || m.verdict === "REJECT") { setIsFaultActive(true); addLog("CRITICAL_RISK_DETECTED"); }
+        await fetchData(); fetchDarkPool().catch(console.error);
+      } else throw new Error(rd.error || "SERVER_ERROR");
     } catch (err: any) {
-      clearInterval(interval);
-      setStatus("UPLINK_CRITICAL_FAILURE");
-      addLog(`ERROR: ${err.message || "NETWORK_TIMEOUT"}`);
-      console.error("[AUDIT] Error:", err);
-    } finally {
-      setLoading(false);
-    }
+      clearInterval(iv); setStatus("UPLINK_CRITICAL_FAILURE"); addLog(`ERROR: ${err.message}`);
+    } finally { setLoading(false); }
   };
 
-  // ─── FORMAT VARIANCE ───
-  const formatVariance = (val: number | string) => {
-    if (val === "N/A" || val === null || val === undefined) return "N/A";
-    const num = parseFloat(val as string);
-    if (isNaN(num)) return "N/A";
-    if (Math.abs(num) > 999) return num > 0 ? "+999.9%" : "-999.9%";
-    return `${num > 0 ? "+" : ""}${num.toFixed(1)}%`;
+  const formatVariance = (v: number | string) => {
+    if (v === "N/A" || v === null) return "N/A";
+    const n = parseFloat(v as string);
+    if (isNaN(n)) return "N/A";
+    if (Math.abs(n) > 999) return n > 0 ? "+999.9%" : "-999.9%";
+    return `${n > 0 ? "+" : ""}${n.toFixed(1)}%`;
   };
 
-  // ─── EVIDENCE POINTS ───
-  const evidencePoints = hasRealData ? (dataOrigin?.sourcesCount || 0) * 12 + Math.round((scoreState !== 'N/A' ? scoreState as number : 0) * 2) : 0;
+  const evidencePts = hasRealData ? (dataOrigin?.sourcesCount || 0) * 12 + Math.round(((scoreState !== "N/A" ? scoreState : 0) as number) * 2) : 0;
 
   if (!mounted) {
     return (
-      <div className="flex h-screen bg-[#0A0A0A] items-center justify-center">
-        <div className="text-[#FF4D00] text-sm font-bold tracking-widest animate-pulse">
-          INITIALIZING SENTINEL CORE...
-        </div>
+      <div style={{ display: "flex", height: "100vh", background: "#03050E", alignItems: "center", justifyContent: "center" }}>
+        <span style={{ fontFamily: "var(--mono)", color: "var(--em)", fontSize: 11, letterSpacing: ".25em", animation: "dot-pulse 1.5s infinite" }}>INITIALIZING SENTINEL CORE...</span>
       </div>
     );
   }
 
+  const NAV_ITEMS = [
+    { id: "description", label: "Evidence Board",       icon: "◈" },
+    { id: "lead",        label: "Acquisition Targets",  icon: "◉" },
+    { id: "contract",    label: "Smart Contracts",      icon: "◆" },
+    { id: "history",     label: "Case Archive",         icon: "◊" },
+    { id: "darkpool",    label: "Dark Pool",            icon: "◉" },
+    { id: "portfolio",   label: "Portfolio Intel",      icon: "◆" },
+  ];
+
+  // ─ SHARED INPUT STYLE ─
+  const inputStyle: React.CSSProperties = {
+    width: "100%", background: "rgba(0,0,0,0.45)", border: "1px solid rgba(0,255,163,0.12)",
+    borderRadius: 7, padding: "10px 13px", color: "var(--em)", fontFamily: "var(--mono)",
+    fontSize: 11, letterSpacing: ".04em", outline: "none",
+    transition: "border-color .25s, box-shadow .25s",
+  };
+
   return (
-    <div className="flex h-screen bg-[#0A0A0A] text-[#E8E4D9] overflow-hidden" style={{ fontFamily: "Inter, sans-serif" }}>
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,wght@0,400;1,400&family=Inter:wght@400;600&display=swap');
-        
-        @keyframes scan-sweep {
-          0% { transform: translateY(-100%); opacity: 0; }
-          10% { opacity: 1; }
-          90% { opacity: 1; }
-          100% { transform: translateY(100vh); opacity: 0; }
-        }
-        @keyframes stamp-in {
-          0% { transform: scale(2) rotate(-12deg); opacity: 0; }
-          100% { transform: scale(1) rotate(-12deg); opacity: 0.8; }
-        }
-        @keyframes evidence-fade {
-          0% { opacity: 0; transform: translateY(12px); }
-          100% { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes pulse-glow {
-          0%, 100% { box-shadow: 0 0 5px rgba(255, 77, 0, 0.3); }
-          50% { box-shadow: 0 0 20px rgba(255, 77, 0, 0.6); }
-        }
-        
-        .animate-scan-sweep { animation: scan-sweep 2.5s ease-in-out infinite; }
-        .animate-stamp-in { animation: stamp-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
-        .animate-evidence { animation: evidence-fade 0.6s ease-out forwards; }
-        .animate-pulse-glow { animation: pulse-glow 2s ease-in-out infinite; }
-        
-        .scrollbar-none::-webkit-scrollbar { display: none; }
-        .custom-scroll::-webkit-scrollbar { width: 3px; }
-        .custom-scroll::-webkit-scrollbar-track { background: transparent; }
-        .custom-scroll::-webkit-scrollbar-thumb { background: #1A1A1A; border-radius: 2px; }
-        
-        .prose-evidence h3 { color: #E8E4D9; font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; border-left: 2px solid #FF4D00; padding-left: 0.5rem; margin: 1rem 0 0.5rem; }
-        .prose-evidence p { color: #E8E4D9; opacity: 0.7; font-family: 'Newsreader', serif; font-size: 0.8rem; line-height: 1.6; margin-bottom: 0.75rem; }
-        .prose-evidence strong { color: #FF4D00; font-family: 'Space Grotesk', sans-serif; font-weight: 700; }
-        .prose-evidence ul { list-style: none; padding-left: 0; }
-        .prose-evidence li { padding-left: 1rem; position: relative; margin-bottom: 0.25rem; }
-        .prose-evidence li::before { content: "▸"; position: absolute; left: 0; color: #FF4D00; opacity: 0.6; }
-      `}</style>
+    <>
+      <style dangerouslySetInnerHTML={{ __html: GLOBAL_CSS }} />
+      <div className="ea-root" style={{ display: "flex", height: "100vh", overflow: "hidden", position: "relative" }}>
+        <AuroraBg />
 
-      {/* ─── SIDEBAR ─── */}
-      <aside className="w-64 border-r border-[#111111] bg-[#0A0A0A] flex flex-col z-30 shrink-0">
-        <div className="p-6 border-b border-[#111111]">
-          <div className="flex items-center gap-3 mb-1">
-            <div className="w-2 h-8 bg-[#FF4D00]" />
-            <div>
-              <h1 className="text-lg font-bold tracking-wider" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
-                estate<span className="text-[#FF4D00]">.</span>ai
-              </h1>
-              <p className="text-[8px] uppercase tracking-[0.2em] opacity-40" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                Forensic Intelligence
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <nav className="flex-1 p-4 space-y-1">
-          {[
-            { id: "description", label: "Evidence Board", icon: "◈" },
-            { id: "lead", label: "Acquisition Targets", icon: "◉" },
-            { id: "contract", label: "Smart Contracts", icon: "◆" },
-            { id: "history", label: "Case Archive", icon: "◊" },
-            { id: "darkpool", label: "Dark Pool", icon: "◉" },
-            { id: "portfolio", label: "Portfolio Intelligence", icon: "◆" },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`w-full text-left px-4 py-3 text-[10px] uppercase tracking-[0.15em] transition-all duration-200 border-l-2 ${
-                activeTab === tab.id
-                  ? "border-[#FF4D00] bg-[#111111] text-[#E8E4D9] font-bold"
-                  : "border-transparent text-[#E8E4D9] opacity-30 hover:opacity-60 hover:bg-[#111111]/50"
-              }`}
-              style={{ fontFamily: "Space Grotesk, sans-serif" }}
-            >
-              <span className="mr-2 opacity-40">{tab.icon}</span>
-              {tab.label}
-            </button>
-          ))}
-        </nav>
-
-        <div className="p-4 border-t border-[#111111]">
-          <div className="mb-4 p-3 bg-[#111111] border border-[#1A1A1A]">
-            <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF4D00] mb-2 flex items-center gap-1.5">
-              <span className="w-1.5 h-1.5 bg-[#FF4D00] rounded-full animate-pulse" />
-              Core Telemetry
-            </p>
-            <TerminalLog logs={systemLogs} />
-          </div>
-          <button
-            onClick={() => supabase.auth.signOut().then(() => router.push("/"))}
-            className="w-full py-2.5 text-[9px] font-bold uppercase tracking-[0.2em] text-[#FF2200] border border-[#FF2200]/20 hover:bg-[#FF2200]/10 transition-all duration-200"
-            style={{ fontFamily: "Space Grotesk, sans-serif" }}
-          >
-            Terminate Session
-          </button>
-        </div>
-      </aside>
-
-      {/* ─── MAIN CANVAS ─── */}
-      <main className="flex-1 flex flex-col relative bg-[#0A0A0A] overflow-hidden">
+        {/* global scan line while loading */}
         <ScanLine active={loading} />
 
-        {/* Header */}
-        <header className="h-16 border-b border-[#111111] flex items-center justify-between px-6 bg-[#0A0A0A] z-20 shrink-0">
-          <div className="flex items-center gap-8">
-            <div className="border-l-2 border-[#FF4D00] pl-3">
-              <p className="text-[8px] font-bold uppercase tracking-[0.2em] opacity-40 mb-0.5">Protocol Status</p>
-              <div className={`text-xs font-bold flex items-center gap-2 ${loading ? "text-[#FFB800]" : "text-[#00C853]"}`} style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                <span className={`w-1.5 h-1.5 rounded-full ${loading ? "bg-[#FFB800] animate-pulse" : "bg-[#00C853]"}`} />
-                {status}
-              </div>
-            </div>
-            <div className="hidden xl:block border-l border-[#111111] pl-6">
-              <p className="text-[8px] font-bold uppercase tracking-[0.2em] opacity-40 mb-0.5">Engine Mode</p>
-              <p className="text-xs font-bold tracking-wider" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                LLAMA_3.3_FORENSIC_CORE
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="text-right hidden sm:block">
-              <p className="text-[7px] font-bold uppercase tracking-[0.2em] opacity-30 mb-0.5">Operator Verified</p>
-              <p className="text-[10px] font-bold opacity-70" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                {userEmail || "PENDING..."}
-              </p>
-            </div>
-            <div className="w-8 h-8 bg-[#111111] border border-[#1A1A1A] flex items-center justify-center text-[10px] font-bold" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
-              S3
-            </div>
-          </div>
-        </header>
-
-        {/* Metrics Bar — FIXED: Type-safe color helpers */}
-        <div className="grid grid-cols-4 border-b border-[#111111] bg-[#0A0A0A] shrink-0">
-          <MetricCounter 
-            label="Evidence Points" 
-            value={evidencePoints} 
-            suffix="pts" 
-            color="#E8E4D9" 
-            isNA={!hasRealData}
-          />
-          <MetricCounter 
-            label="Acquisition Targets" 
-            value={leads.length} 
-            suffix="active" 
-            color="#00C853" 
-          />
-          <MetricCounter 
-            label="Forensic Score" 
-            value={scoreState} 
-            suffix="/10" 
-            color={getScoreColor(scoreState)} 
-            isNA={scoreState === 'N/A'}
-          />
-          <MetricCounter 
-            label="Variance Delta" 
-            value={varianceState} 
-            suffix="" 
-            color={getVarianceColor(varianceState)} 
-            isNA={varianceState === 'N/A'}
-          />
-        {futureScoreState !== null && (
-          <div className="border-b border-[#FF2200]/20 bg-[#FF2200]/5">
-            <FutureScoreCard 
-              currentScore={scoreState} 
-              futureScore={futureScoreState} 
-              verdict={futureVerdictState}
-            />
-          </div>
-        )}
-
-        {/* Critical Events Timeline */}
-        {futureEvents.length > 0 && (
-          <div className="border-b border-[#111111] bg-[#0A0A0A] p-3">
-            <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF2200] mb-2">Critical Events Timeline</p>
-            <div className="flex gap-2 overflow-x-auto scrollbar-none">
-              {futureEvents.map((evt, i) => (
-                <div key={`evt-${i}`} className="shrink-0 px-3 py-2 border border-[#111111] bg-[#111111]/50">
-                  <div className="text-[10px] font-bold" style={{ fontFamily: "IBM Plex Mono, monospace" }}>{evt.year}</div>
-                  <div className="text-[8px] opacity-60 max-w-[120px] truncate">{evt.event}</div>
-                  <div className={`text-[7px] font-bold mt-1 ${evt.severity === 'CRITICAL' ? 'text-[#FF2200]' : evt.severity === 'HIGH' ? 'text-[#FF6B00]' : 'text-[#FFB800]'}`}>{evt.severity}</div>
+        {/* ─────────────────── SIDEBAR ─────────────────── */}
+        <aside style={{
+          width: 220, flexShrink: 0, position: "relative", zIndex: 20,
+          display: "flex", flexDirection: "column",
+          background: "rgba(3,5,14,0.85)", backdropFilter: "blur(20px)",
+          borderRight: "1px solid rgba(0,255,163,0.10)",
+        }}>
+          {/* logo */}
+          <div style={{ padding: "20px 18px 18px", borderBottom: "1px solid rgba(0,255,163,0.08)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 3, height: 32, background: "var(--em)", borderRadius: 2, boxShadow: "0 0 10px var(--em)" }} />
+              <div>
+                <div style={{ fontFamily: "var(--display)", fontSize: 17, fontWeight: 700, letterSpacing: ".06em" }}>
+                  estate<span style={{ color: "var(--em)" }}>.</span>ai
                 </div>
-              ))}
+                <div className="ea-label" style={{ fontSize: 7, marginTop: 2 }}>Forensic Intelligence</div>
+              </div>
             </div>
           </div>
-        )}
-        </div>
 
-        {/* Content Area */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Panel */}
-          {activeTab === "description" && (
-            <div className="w-80 min-w-[20rem] border-r border-[#111111] bg-[#0A0A0A] flex flex-col shrink-0">
-              <div className="flex-1 p-5 space-y-4 overflow-y-auto scrollbar-none">
-                <EvidenceCard title="Asset Parameters" stamp={lastStamp}>
-                  <div className="space-y-3">
-                    {[
-                      { l: "Asset Classification", v: property, s: setProperty, p: "e.g. Villa, Apartment" },
-                      { l: "Capital Valuation", v: price, s: setPrice, p: "e.g. AED 13,199,000" },
-                      { l: "Geo Coordinates", v: location, s: setLocation, p: "e.g. Jumeirah Park, Dubai" },
-                    ].map((inp, i) => (
-                      <div key={i} className="space-y-1">
-                        <label className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-40" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
-                          {inp.l}
-                        </label>
-                        <input
-                          placeholder={inp.p}
-                          value={inp.v}
-                          onChange={(e) => inp.s(e.target.value)}
-                          className="w-full bg-[#111111] border border-[#1A1A1A] px-3 py-2.5 text-xs text-[#E8E4D9] placeholder:opacity-20 outline-none focus:border-[#FF4D00]/50 transition-colors"
-                          style={{ fontFamily: "IBM Plex Mono, monospace" }}
-                        />
-                      </div>
-                    ))}
-                    
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1">
-                        <label className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-40">Beds</label>
-                        <input
-                          type="number"
-                          value={beds}
-                          onChange={(e) => setBeds(Number(e.target.value) || 3)}
-                          className="w-full bg-[#111111] border border-[#1A1A1A] px-3 py-2 text-xs text-[#E8E4D9] outline-none focus:border-[#FF4D00]/50"
-                          style={{ fontFamily: "IBM Plex Mono, monospace" }}
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <label className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-40">Baths</label>
-                        <input
-                          type="number"
-                          value={baths}
-                          onChange={(e) => setBaths(Number(e.target.value) || 2)}
-                          className="w-full bg-[#111111] border border-[#1A1A1A] px-3 py-2 text-xs text-[#E8E4D9] outline-none focus:border-[#FF4D00]/50"
-                          style={{ fontFamily: "IBM Plex Mono, monospace" }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </EvidenceCard>
+          {/* nav */}
+          <nav style={{ flex: 1, padding: "12px 8px", display: "flex", flexDirection: "column", gap: 2 }}>
+            {NAV_ITEMS.map((t) => (
+              <button key={t.id} onClick={() => setActiveTab(t.id)} className={`ea-nav-item${activeTab === t.id ? " active" : ""}`}>
+                <span className="ea-nav-icon">{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
+          </nav>
 
-                {/* Data Origin Badge in sidebar */}
-                {dataOrigin && (
-                  <div className="p-3 border border-[#111111] bg-[#111111]/30">
-                    <p className="text-[8px] font-bold uppercase tracking-[0.15em] opacity-40 mb-2">Data Origin</p>
-                    <DataOriginBadge origin={dataOrigin} />
-                    <p className="text-[8px] opacity-30 mt-2" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                      {dataOrigin.fallbackReason || "Real-time analysis"}
-                    </p>
-                  </div>
-                )}
-
-                <button
-                  onClick={(e) => handleAction(undefined, false, e, "AUDIT")}
-                  disabled={loading}
-                  className="w-full py-3 bg-[#FF4D00] text-[#0A0A0A] font-bold text-[10px] uppercase tracking-[0.15em] hover:bg-[#FF6B2C] transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed animate-pulse-glow"
-                  style={{ fontFamily: "Space Grotesk, sans-serif" }}
-                >
-                  {loading ? "◉ FORENSIC ANALYSIS RUNNING..." : "◉ INITIATE AUDIT"}
-                </button>
-
-                {verdictState === "PRIME_ASSET" && (
-                  <div className="p-3 border border-[#FFB800]/30 bg-[#FFB800]/5 text-center">
-                    <p className="text-[9px] font-bold uppercase tracking-[0.15em] text-[#FFB800] mb-2">Prime Asset Detected</p>
-                    <button
-                      onClick={() => setActiveTab("lead")}
-                      className="w-full py-2 bg-[#FFB800] text-[#0A0A0A] font-bold text-[9px] uppercase tracking-wider hover:bg-[#FFD54F] transition-colors"
-                    >
-                      Route to Acquisition
-                    </button>
-                  </div>
-                )}
+          {/* terminal + signout */}
+          <div style={{ padding: 12, borderTop: "1px solid rgba(0,255,163,0.08)" }}>
+            <div className="ea-glass" style={{ padding: "10px 12px", marginBottom: 10, background: "rgba(0,0,0,0.35)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
+                <div className="ea-dot" style={{ width: 5, height: 5 }} />
+                <span className="ea-label" style={{ fontSize: 7, color: "rgba(0,255,163,0.55)" }}>Core Telemetry</span>
               </div>
+              <TerminalLog logs={systemLogs} />
+            </div>
+            <button className="ea-btn-danger" style={{ width: "100%", textAlign: "center" }}
+              onClick={() => supabase.auth.signOut().then(() => router.push("/"))}>
+              Terminate Session
+            </button>
+          </div>
+        </aside>
 
-              <div className="p-4 border-t border-[#111111]">
-                <p className="text-[8px] font-bold uppercase tracking-[0.15em] text-[#FF2200] mb-1 flex items-center gap-1.5">
-                  <span>◉</span> Reality Check Protocol
-                </p>
-                <p className="text-[9px] opacity-40 leading-normal mb-3" style={{ fontFamily: "Newsreader, serif" }}>
-                  Enforce strict discrepancy scans over current evaluation matrices.
-                </p>
-                <button
-                  onClick={(e) =>
-                    handleAction(
-                      "Conduct a mandatory investment reality check. Identify all risks, tax discrepancies, and overpayment flags.",
-                      true,
-                      e,
-                      "REALITY_CHECK"
-                    )
-                  }
-                  className="w-full py-2.5 text-[9px] font-bold uppercase tracking-[0.15em] border border-[#FF2200]/30 text-[#FF2200] bg-[#FF2200]/5 hover:bg-[#FF2200]/15 transition-colors"
-                  style={{ fontFamily: "Space Grotesk, sans-serif" }}
-                >
-                  ACTIVATE RISK MITIGATION
-                </button>
+        {/* ─────────────────── MAIN ─────────────────── */}
+        <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative", zIndex: 10 }}>
+
+          {/* ── HEADER ── */}
+          <header style={{
+            height: 60, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between",
+            padding: "0 24px", borderBottom: "1px solid rgba(0,255,163,0.09)",
+            background: "rgba(3,5,14,0.8)", backdropFilter: "blur(16px)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
+              <div style={{ borderLeft: "2px solid var(--em)", paddingLeft: 12 }}>
+                <div className="ea-label" style={{ fontSize: 7, marginBottom: 3 }}>Protocol Status</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, color: loading ? "#FFB800" : "var(--ok)" }}>
+                  <div className="ea-dot" style={{ width: 5, height: 5, background: loading ? "#FFB800" : "var(--ok)" }} />
+                  {status}
+                </div>
+              </div>
+              <div style={{ borderLeft: "1px solid rgba(0,255,163,0.1)", paddingLeft: 20 }}>
+                <div className="ea-label" style={{ fontSize: 7, marginBottom: 3 }}>Engine</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 10, fontWeight: 700, letterSpacing: ".06em" }}>LLAMA_3.3_FORENSIC</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <SignalBars active={loading} />
+              <div style={{ textAlign: "right" }}>
+                <div className="ea-label" style={{ fontSize: 7, marginBottom: 2 }}>Operator</div>
+                <div style={{ fontFamily: "var(--mono)", fontSize: 9, opacity: .65 }}>{userEmail || "PENDING..."}</div>
+              </div>
+              <div style={{
+                width: 32, height: 32, background: "rgba(0,255,163,0.08)", border: "1px solid rgba(0,255,163,0.2)",
+                borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center",
+                fontFamily: "var(--display)", fontSize: 10, fontWeight: 700, color: "var(--em)",
+              }}>S3</div>
+            </div>
+          </header>
+
+          {/* ── METRICS STRIP ── */}
+          <div style={{ flexShrink: 0, display: "grid", gridTemplateColumns: "repeat(4,1fr)", background: "rgba(3,5,14,0.75)", borderBottom: "1px solid rgba(0,255,163,0.09)" }}>
+            <MetricCounter label="Evidence Points"   value={evidencePts}    suffix="pts"  color="var(--text)"                isNA={!hasRealData} />
+            <MetricCounter label="Acquisition Targets" value={leads.length} suffix="active" color="var(--ok)" />
+            <MetricCounter label="Forensic Score"    value={scoreState}     suffix="/10"  color={getScoreColor(scoreState)}  isNA={scoreState === "N/A"} />
+            <MetricCounter label="Variance Delta"    value={varianceState}  suffix=""     color={getVarianceColor(varianceState)} isNA={varianceState === "N/A"} />
+          </div>
+
+          {/* future score banner */}
+          {futureScoreState !== null && (
+            <div style={{ flexShrink: 0, borderBottom: "1px solid rgba(255,77,46,0.18)", background: "rgba(255,77,46,0.05)" }}>
+              <FutureScoreCard currentScore={scoreState} futureScore={futureScoreState} verdict={futureVerdictState} />
+            </div>
+          )}
+
+          {/* critical events */}
+          {futureEvents.length > 0 && (
+            <div style={{ flexShrink: 0, padding: "10px 20px", borderBottom: "1px solid rgba(0,255,163,0.09)", background: "rgba(3,5,14,0.7)" }}>
+              <div className="ea-label" style={{ fontSize: 7.5, color: "rgba(255,77,46,0.7)", marginBottom: 8 }}>Critical Events Timeline</div>
+              <div style={{ display: "flex", gap: 8, overflowX: "auto" }} className="ea-scroll-none">
+                {futureEvents.map((e, i) => (
+                  <div key={i} className="ea-glass" style={{ flexShrink: 0, padding: "8px 12px", minWidth: 110 }}>
+                    <div style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, color: "var(--em)" }}>{e.year}</div>
+                    <div style={{ fontSize: 8, opacity: .55, marginTop: 2, maxWidth: 100, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--mono)" }}>{e.event}</div>
+                    <div style={{ fontSize: 7.5, fontWeight: 700, marginTop: 4, fontFamily: "var(--mono)", color: e.severity === "CRITICAL" ? "#FF4D2E" : e.severity === "HIGH" ? "#FF6B00" : "#FFB800" }}>{e.severity}</div>
+                  </div>
+                ))}
               </div>
             </div>
           )}
 
-          {/* Right Panel */}
-          <div className="flex-1 flex flex-col relative overflow-hidden">
-            <div ref={scrollRef} className="flex-1 overflow-y-auto p-6 custom-scroll">
-              {activeTab === "description" && (
-                <div className="max-w-4xl mx-auto space-y-6">
-                  {/* Data Origin Banner for latest analysis */}
-                  {dataOrigin && messages.length > 1 && (
-                    <div className="animate-evidence">
-                      <div className="flex justify-between items-center border-b border-[#111111] pb-3">
-                        <DataOriginBadge origin={dataOrigin} />
-                        <span className="text-xs text-gray-500 font-mono">
-                          {new Date(dataOrigin.lastUpdated).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                     {futureScoreState !== null && (
-  <div className="border-b border-[#FF2200]/20 bg-[#FF2200]/5 p-4">
-    <div className="flex justify-between items-center mb-3">
-      <span className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF2200]">20-Year Decay Forecast</span>
-      <span className="text-[10px] font-bold" style={{ color: (typeof scoreState === 'number' ? scoreState : 0) - futureScoreState > 3 ? "#FF2200" : "#FFB800" }}>
-        {(typeof scoreState === 'number' ? scoreState : 0) - futureScoreState > 4 && (
-          <span className="text-[8px] text-[#FF2200] animate-pulse">⚠ CRITICAL DECAY</span>
-        )}
-      </span>
-    </div>
-    <div className="flex items-center gap-6">
-      <div className="text-center">
-        <div className="text-2xl font-bold" style={{ color: getScoreColor(scoreState), fontFamily: "IBM Plex Mono, monospace" }}>
-          {typeof scoreState === 'number' ? scoreState.toFixed(1) : "0.0"}
-        </div>
-        <div className="text-[8px] opacity-40 mt-1">TODAY</div>
-      </div>
-      <div className="flex-1 h-[3px] bg-[#111111] relative rounded">
-        <div className="absolute h-full rounded bg-gradient-to-r from-[#00C853] via-[#FFB800] to-[#FF2200]" style={{ width: `${(futureScoreState / 10) * 100}%` }} />
-      </div>
-      <div className="text-center">
-        <div className="text-2xl font-bold" style={{ color: getScoreColor(futureScoreState), fontFamily: "IBM Plex Mono, monospace" }}>
-          {futureScoreState.toFixed(1)}
-        </div>
-        <div className="text-[8px] opacity-40 mt-1">2046</div>
-      </div>
-    </div>
-    <div className="mt-3 flex justify-between items-center">
-      <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: futureVerdictState.includes("LEGACY") ? "#00C853" : futureVerdictState.includes("CONDITIONAL") ? "#FFB800" : futureVerdictState.includes("EXIT") ? "#FF6B00" : futureVerdictState.includes("TOXIC") ? "#FF2200" : "#8B0000" }}>
-        {futureVerdictState}
-      </span>
-      {(typeof scoreState === 'number' ? scoreState : 0) - futureScoreState > 4 && (
-        <span className="text-[8px] text-[#FF2200] animate-pulse">⚠ CRITICAL DECAY</span>
-      )}
-    </div>
-  </div>
-)}
-                  {messages.map((m, i) => (
-                    <div key={i} className={`animate-evidence ${m.role === "user" ? "ml-auto max-w-2xl" : "max-w-3xl"}`} style={{ animationDelay: `${i * 0.1}s` }}>
-                      <div
-                        className={`border p-5 relative ${
-                          m.role === "user"
-                            ? "bg-[#111111] border-[#1A1A1A] text-[#E8E4D9] opacity-70"
-                            : "bg-[#0A0A0A] border-[#111111] text-[#E8E4D9]"
-                        }`}
-                      >
-                        {m.role === "assistant" && i > 0 && (
-                          <div className="absolute -top-2 -left-2 w-4 h-4 bg-[#FF4D00] flex items-center justify-center">
-                            <span className="text-[8px] text-[#0A0A0A] font-bold">!</span>
-                          </div>
-                        )}
-                        <div className="prose-evidence">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
-                        </div>
-                        {m.role === "assistant" && i > 0 && (
-                          <div className="mt-4 pt-3 border-t border-[#111111] flex justify-between items-center">
-                            <span className="text-[8px] uppercase tracking-[0.2em] opacity-30" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                              Verified Telemetry // Sentinel_v3.3
-                            </span>
-                            <button
-                              onClick={() => generatePDF(m.content)}
-                              className="px-3 py-1.5 bg-[#111111] border border-[#1A1A1A] text-[9px] font-bold uppercase tracking-wider hover:border-[#FF4D00]/50 transition-colors"
-                            >
-                              Export PDF
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+          {/* ── CONTENT SPLIT ── */}
+          <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
 
-                  {loading && (
-                    <div className="p-6 border border-[#111111] bg-[#111111]/30 space-y-3">
-                      <div className="h-2 bg-[#1A1A1A] rounded w-full animate-pulse" />
-                      <div className="h-2 bg-[#111111] rounded w-5/6 animate-pulse" style={{ animationDelay: "0.1s" }} />
-                      <div className="h-2 bg-[#111111] rounded w-2/3 animate-pulse" style={{ animationDelay: "0.2s" }} />
-                      <p className="text-[8px] text-[#FF4D00] font-bold uppercase tracking-widest pt-2 animate-pulse">Forensic analysis in progress...</p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {activeTab === "lead" && (
-                <div className="max-w-4xl mx-auto">
-                  <h2 className="text-sm font-bold uppercase tracking-[0.1em] border-l-2 border-[#00C853] pl-3 mb-6" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
-                    Acquisition Targets ({leads.length})
-                  </h2>
-                  {!leads.length ? (
-                    <div className="border border-dashed border-[#1A1A1A] p-8 text-center">
-                      <p className="text-[10px] uppercase tracking-wider opacity-30">No acquisition targets in system pool.</p>
-                    </div>
-                  ) : (
-                    leads.map((l, i) => (
-                      <div
-                        key={i}
-                        className="p-4 border border-[#111111] bg-[#111111]/30 mb-3 flex justify-between items-center hover:border-[#00C853]/30 transition-colors group"
-                      >
-                        <div className="flex gap-4 items-center">
-                          <div className="w-2 h-2 bg-[#00C853] rounded-full shadow-[0_0_10px_#00C853]" />
-                          <div>
-                            <p className="text-[9px] font-bold uppercase tracking-wider text-[#00C853] mb-0.5">{l.audit_verdict}</p>
-                            <p className="text-xs font-bold" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                              {l.location_data} — <span className="opacity-40">{l.target_value}</span>
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => generatePDF(l.output_text || "")}
-                          className="px-3 py-1.5 bg-[#111111] border border-[#1A1A1A] text-[9px] font-bold uppercase tracking-wider hover:border-[#00C853]/50 transition-colors opacity-0 group-hover:opacity-100"
-                        >
-                          Extract
-                        </button>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-
-              {activeTab === "contract" && (
-                <div className="max-w-4xl mx-auto">
-                  <h2 className="text-sm font-bold uppercase tracking-[0.1em] border-l-2 border-[#FF4D00] pl-3 mb-6" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
-                    Smart Contract Protocols
-                  </h2>
-                  <div className="p-6 border border-[#FF4D00]/20 bg-[#FF4D00]/5">
-                    <span className="text-[9px] font-bold text-[#FF4D00] uppercase tracking-widest block mb-2">Escrow Engine Status</span>
-                    <p className="text-xs opacity-50 leading-relaxed" style={{ fontFamily: "Newsreader, serif" }}>
-                      System awaiting formal parameter extraction confirmation to allocate smart pipeline escrow deployments.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {activeTab === "history" && (
-                <div className="max-w-4xl mx-auto">
-                  <h2 className="text-sm font-bold uppercase tracking-[0.1em] border-l-2 border-[#E8E4D9] pl-3 mb-6" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
-                    Case Archive ({history.length})
-                  </h2>
-                  {!history.length ? (
-                    <div className="border border-dashed border-[#1A1A1A] p-8 text-center">
-                      <p className="text-[10px] uppercase tracking-wider opacity-30">Historical query stack is empty.</p>
-                    </div>
-                  ) : (
-                    
-                    history.map((h, i) => (
-                      <div
-                        key={i}
-                        className="p-5 border border-[#111111] bg-[#111111]/20 mb-4 relative hover:border-[#1A1A1A] transition-colors"
-                      >
-                        <div className="absolute top-4 right-4 flex gap-3 items-center">
-                          <span className="text-[9px] opacity-30" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                            {new Date(h.created_at).toLocaleDateString()}
-                          </span>
-                          <button
-                            onClick={() => generatePDF(h.output_text)}
-                            className="text-[9px] font-bold uppercase tracking-wider hover:text-[#FF4D00] transition-colors"
-                          >
-                            Download
-                          </button>
-                        </div>
-                        <div className="prose-evidence mt-2">
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{h.output_text}</ReactMarkdown>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-                          )}
-            </div>
-
-          {activeTab === "portfolio" && (
-            <div className="max-w-4xl mx-auto">
-              <h2 className="text-sm font-bold uppercase tracking-[0.1em] border-l-2 border-[#00C853] pl-3 mb-6" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
-                Portfolio Intelligence
-              </h2>
-              
-              {!portfolioAnalysis ? (
-                <div className="border border-dashed border-[#1A1A1A] p-8">
-                  <p className="text-[10px] uppercase tracking-wider opacity-30 mb-4">Upload portfolio JSON for analysis</p>
-                  <textarea 
-                    value={portfolioJson}
-                    onChange={(e) => setPortfolioJson(e.target.value)}
-                    placeholder='[{"id":"V1","location":"dubai","propertyType":"villa","currentValue":5000000,"purchasePrice":4000000,"yield":5.5,"riskScore":4}]'
-                    className="w-full h-32 bg-[#111111] border border-[#1A1A1A] p-3 text-xs text-[#E8E4D9] placeholder:opacity-20 outline-none focus:border-[#FF4D00]/50 mb-4 font-mono"
-                  />
-                  <button 
-                    onClick={handlePortfolioUpload}
-                    className="px-6 py-2 bg-[#FF4D00] text-[#0A0A0A] font-bold text-[10px] uppercase tracking-widest"
-                  >
-                    ANALYZE PORTFOLIO
-                  </button>
-                </div>
-              ) : (
-                <div className="space-y-6">
-                  {/* Metrics */}
-                  <div className="grid grid-cols-4 border border-[#111111]">
-                    <div className="p-4 border-r border-[#111111]">
-                      <div className="text-[8px] uppercase opacity-40 mb-1">Total Value</div>
-                      <div className="text-xl font-bold" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                        ${(portfolioAnalysis.portfolioMetrics.totalValue / 1000000).toFixed(1)}M
-                      </div>
-                    </div>
-                    <div className="p-4 border-r border-[#111111]">
-                      <div className="text-[8px] uppercase opacity-40 mb-1">Avg Yield</div>
-                      <div className="text-xl font-bold text-[#00C853]" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                        {portfolioAnalysis.portfolioMetrics.avgYield.toFixed(1)}%
-                      </div>
-                    </div>
-                    <div className="p-4 border-r border-[#111111]">
-                      <div className="text-[8px] uppercase opacity-40 mb-1">Risk Score</div>
-                      <div className="text-xl font-bold" style={{ color: portfolioAnalysis.portfolioMetrics.avgRisk > 6 ? '#FF2200' : '#FFB800', fontFamily: "IBM Plex Mono, monospace" }}>
-                        {portfolioAnalysis.portfolioMetrics.avgRisk.toFixed(1)}/10
-                      </div>
-                    </div>
-                    <div className="p-4">
-                      <div className="text-[8px] uppercase opacity-40 mb-1">Diversification</div>
-                      <div className="text-xl font-bold text-[#00C853]" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                        {portfolioAnalysis.portfolioMetrics.diversificationScore.toFixed(1)}/10
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Rebalance Signals */}
-                  {portfolioAnalysis.rebalanceSignals.length > 0 && (
-                    <div className="border border-[#FF2200]/20 bg-[#FF2200]/5 p-4">
-                      <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FF2200] mb-3">
-                        Rebalance Signals ({portfolioAnalysis.rebalanceSignals.length})
-                      </p>
-                      {portfolioAnalysis.rebalanceSignals.map((signal: any, i: number) => (
-                        <div key={i} className="flex items-center gap-3 mb-2 p-2 bg-[#0A0A0A] border border-[#111111]">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: signal.action === 'SELL' ? '#FF2200' : signal.action === 'REDUCE' ? '#FF6B00' : '#FFB800' }} />
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className="text-[9px] font-bold uppercase">{signal.action}</span>
-                              <span className="text-[8px] opacity-40">{signal.assetId}</span>
-                            </div>
-                            <p className="text-[8px] opacity-60">{signal.reason}</p>
-                          </div>
-                          <span className="text-[7px] font-bold px-2 py-1" style={{ backgroundColor: signal.urgency === 'IMMEDIATE' ? '#FF2200' : signal.urgency === '30_DAYS' ? '#FF6B00' : '#FFB800', color: '#0A0A0A' }}>
-                            {signal.urgency}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Correlations */}
-                  {portfolioAnalysis.correlations.length > 0 && (
-                    <div className="border border-[#FFB800]/20 bg-[#FFB800]/5 p-4">
-                      <p className="text-[8px] font-bold uppercase tracking-[0.2em] text-[#FFB800] mb-3">
-                        Correlation Risks ({portfolioAnalysis.correlations.length})
-                      </p>
-                      {portfolioAnalysis.correlations.map((c: any, i: number) => (
-                        <div key={i} className="text-[8px] mb-1">
-                          <span className="text-[#FF2200] font-bold">{c.pair[0]}</span> ↔ <span className="text-[#FF2200] font-bold">{c.pair[1]}</span> = {(c.correlation * 100).toFixed(0)}% correlation
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-          {activeTab === "darkpool" && (
-            <div className="max-w-4xl mx-auto">
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-sm font-bold uppercase tracking-[0.1em] border-l-2 border-[#FF2200] pl-3" style={{ fontFamily: "Space Grotesk, sans-serif" }}>
-                  Dark Pool Opportunities ({darkPoolDeals.length})
-                </h2>
-                <button 
-                  onClick={() => fetchDarkPool()}
-                  disabled={darkPoolLoading}
-                  className="px-3 py-1.5 bg-[#FF2200] text-[#0A0A0A] text-[8px] font-bold uppercase tracking-wider hover:bg-[#FF6B2C] transition-colors disabled:opacity-30"
-                >
-                  {darkPoolLoading ? "SCANNING..." : "◉ RE-SCAN"}
-                </button>
-              </div>
-              
-              {!darkPoolDeals.length ? (
-                <div className="border border-dashed border-[#1A1A1A] p-8 text-center">
-                  <div className="text-4xl mb-4 opacity-20">🔒</div>
-                  <p className="text-[10px] uppercase tracking-wider opacity-30 mb-2">No off-market opportunities detected.</p>
-                  <p className="text-[8px] opacity-20">Enter location to scan developer CRMs, court auctions, and broker networks.</p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {darkPoolDeals.map((deal, i) => (
-                    <div key={deal.id} className="border border-[#FF2200]/20 bg-[#FF2200]/5 relative overflow-hidden group hover:border-[#FF2200]/40 transition-colors">
-                      <div className="absolute top-0 right-0 px-3 py-1 bg-[#FF2200] text-[#0A0A0A] text-[8px] font-bold uppercase tracking-wider">
-                        {deal.type}
-                      </div>
-                      <div className="p-4">
-                        <div className="flex items-start gap-4">
-                          <div className="w-10 h-10 bg-[#111111] border border-[#1A1A1A] flex items-center justify-center text-lg shrink-0 group-hover:bg-[#FF2200]/10 transition-colors">
-                            {deal.type === "PRE_LAUNCH" ? "🚀" : deal.type === "DISTRESSED" ? "⚡" : "🔥"}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                              <span className="text-[9px] font-bold uppercase tracking-wider text-[#FF2200]">{deal.id}</span>
-                              <span className="text-[7px] opacity-30">|</span>
-                              <span className="text-[7px] opacity-30 uppercase">{deal.source}</span>
-                            </div>
-                            <p className="text-xs font-bold mb-2 truncate" style={{ fontFamily: "IBM Plex Mono, monospace" }}>
-                              {deal.location} — <span className="opacity-40">{deal.propertyType}</span>
-                            </p>
-                            <div className="flex items-center gap-3 mb-2">
-                              <span className="px-2 py-1 bg-[#FF2200] text-[#0A0A0A] text-[10px] font-bold">
-                                {deal.discount}% OFF MARKET
-                              </span>
-                              {deal.minInvestment && (
-                                <span className="text-[9px] opacity-60" style={{ fontFamily: "IBM Plex Mono, monospace" }}>Min: {deal.minInvestment}</span>
-                              )}
-                              {deal.reservePrice && (
-                                <span className="text-[9px] opacity-60" style={{ fontFamily: "IBM Plex Mono, monospace" }}>Reserve: {deal.reservePrice}</span>
-                              )}
-                            </div>
-                            {deal.reason && <p className="text-[8px] text-[#FF2200]">{deal.reason}</p>}
-                            {deal.expiresAt && (
-                              <div className="flex items-center gap-1 mt-2">
-                                <span className="w-1.5 h-1.5 bg-[#FF2200] rounded-full animate-pulse" />
-                                <span className="text-[8px] text-[#FF2200] font-bold">
-                                  Expires {new Date(deal.expiresAt).toLocaleDateString()} ({Math.ceil((new Date(deal.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24))}d)
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="px-4 py-2 bg-[#111111]/50 border-t border-[#111111] flex items-center justify-between">
-                        <span className="text-[7px] opacity-30 uppercase tracking-wider">Off-Market Access Required</span>
-                        <button className="px-3 py-1 bg-[#FF2200] text-[#0A0A0A] text-[8px] font-bold uppercase tracking-wider hover:bg-[#FF6B2C] transition-colors">
-                          REQUEST ACCESS
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
+            {/* left panel — only on description tab */}
             {activeTab === "description" && (
-              <div className="p-4 border-t border-[#111111] bg-[#0A0A0A] shrink-0">
-                <div className="max-w-5xl mx-auto flex gap-3">
-                  <input
-                    value={chatInput}
-                    onChange={(e) => setChatInput(e.target.value)}
-                    placeholder="Enter forensic command (e.g. Scan portfolio overvaluations in Manhattan)..."
-                    onKeyDown={(e) => e.key === "Enter" && handleAction(undefined, false, e, "CHAT_COMMAND")}
-                    className="flex-1 bg-[#111111] border border-[#1A1A1A] px-4 py-3 text-xs text-[#E8E4D9] placeholder:opacity-20 outline-none focus:border-[#FF4D00]/50 transition-colors"
-                    style={{ fontFamily: "IBM Plex Mono, monospace" }}
-                  />
-                  <button
-                    onClick={(e) => handleAction(undefined, false, e, "CHAT_COMMAND")}
-                    className="px-6 bg-[#FF4D00] text-[#0A0A0A] font-bold text-[10px] uppercase tracking-widest hover:bg-[#FF6B2C] transition-colors"
-                    style={{ fontFamily: "Space Grotesk, sans-serif" }}
-                  >
-                    TRANSMIT
+              <div style={{
+                width: 280, flexShrink: 0, display: "flex", flexDirection: "column",
+                borderRight: "1px solid rgba(0,255,163,0.09)",
+                background: "rgba(3,5,14,0.7)", backdropFilter: "blur(12px)",
+              }}>
+                <div className="ea-scroll-none" style={{ flex: 1, overflowY: "auto", padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+
+                  <EvidenceCard title="Asset Parameters" stamp={lastStamp}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      {[
+                        { l: "Asset Classification", v: property, s: setProperty, p: "Villa, Apartment…" },
+                        { l: "Capital Valuation",    v: price,    s: setPrice,    p: "AED 13,199,000"   },
+                        { l: "Geo Coordinates",      v: location, s: setLocation, p: "Jumeirah Park, Dubai" },
+                      ].map((inp, i) => (
+                        <div key={i}>
+                          <label className="ea-label" style={{ display: "block", marginBottom: 5, fontSize: 7.5 }}>{inp.l}</label>
+                          <input
+                            className="ea-input" placeholder={inp.p} value={inp.v}
+                            onChange={(e) => inp.s(e.target.value)}
+                          />
+                        </div>
+                      ))}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        {[["Beds", beds, setBeds], ["Baths", baths, setBaths]].map(([lbl, val, set]: any) => (
+                          <div key={lbl as string}>
+                            <label className="ea-label" style={{ display: "block", marginBottom: 5, fontSize: 7.5 }}>{lbl as string}</label>
+                            <input type="number" className="ea-input" value={val as number} onChange={(e) => set(Number(e.target.value) || 1)} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </EvidenceCard>
+
+                  {dataOrigin && (
+                    <div className="ea-glass" style={{ padding: "10px 12px" }}>
+                      <div className="ea-label" style={{ fontSize: 7.5, marginBottom: 6 }}>Data Origin</div>
+                      <DataOriginBadge origin={dataOrigin} />
+                      {dataOrigin.fallbackReason && (
+                        <div style={{ fontFamily: "var(--mono)", fontSize: 8, opacity: .3, marginTop: 6 }}>{dataOrigin.fallbackReason}</div>
+                      )}
+                    </div>
+                  )}
+
+                  <button className="ea-btn-primary" style={{ width: "100%" }}
+                    onClick={(e) => handleAction(undefined, false, e, "AUDIT")} disabled={loading}>
+                    {loading ? "◉ ANALYSIS RUNNING..." : "◉ INITIATE AUDIT"}
+                  </button>
+
+                  {verdictState === "PRIME_ASSET" && (
+                    <div className="ea-glass" style={{ padding: "12px", textAlign: "center", borderColor: "rgba(255,184,0,0.3)", background: "rgba(255,184,0,0.05)" }}>
+                      <div className="ea-label" style={{ color: "#FFB800", fontSize: 8, marginBottom: 8 }}>Prime Asset Detected</div>
+                      <button className="ea-btn-primary" style={{ background: "linear-gradient(135deg,#CC9400,#FFB800)", width: "100%", fontSize: 9 }}
+                        onClick={() => setActiveTab("lead")}>Route to Acquisition</button>
+                    </div>
+                  )}
+                </div>
+
+                {/* reality check */}
+                <div style={{ padding: "12px 14px", borderTop: "1px solid rgba(0,255,163,0.08)" }}>
+                  <div className="ea-label" style={{ color: "rgba(255,77,46,0.65)", marginBottom: 4, fontSize: 7.5, display: "flex", alignItems: "center", gap: 5 }}>
+                    <span>◉</span> Reality Check Protocol
+                  </div>
+                  <p style={{ fontFamily: "var(--serif)", fontSize: 10, opacity: .35, lineHeight: 1.5, marginBottom: 8 }}>
+                    Enforce strict discrepancy scans over current evaluation matrices.
+                  </p>
+                  <button className="ea-btn-danger" style={{ width: "100%" }}
+                    onClick={(e) => handleAction("Conduct a mandatory investment reality check. Identify all risks, tax discrepancies, and overpayment flags.", true, e, "REALITY_CHECK")}>
+                    ACTIVATE RISK MITIGATION
                   </button>
                 </div>
               </div>
             )}
+
+            {/* ── RIGHT / MAIN CONTENT ── */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              <div ref={scrollRef} className="ea-scroll" style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+
+                {/* ── EVIDENCE BOARD ── */}
+                {activeTab === "description" && (
+                  <div style={{ maxWidth: 860, margin: "0 auto", display: "flex", flexDirection: "column", gap: 18 }}>
+                    {dataOrigin && messages.length > 1 && (
+                      <div className="ea-fadeup" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 14, borderBottom: "1px solid rgba(0,255,163,0.08)" }}>
+                        <DataOriginBadge origin={dataOrigin} />
+                        <span style={{ fontFamily: "var(--mono)", fontSize: 9, opacity: .35 }}>{new Date(dataOrigin.lastUpdated).toLocaleString()}</span>
+                      </div>
+                    )}
+
+                    {messages.map((m, i) => (
+                      <div key={i} className="ea-fadeup" style={{ animationDelay: `${i * 0.08}s`, maxWidth: m.role === "user" ? 560 : 760, marginLeft: m.role === "user" ? "auto" : 0 }}>
+                        <div className="ea-glass" style={{
+                          padding: "16px 18px", position: "relative",
+                          borderColor: m.role === "user" ? "rgba(0,255,163,0.08)" : "rgba(0,255,163,0.12)",
+                          background: m.role === "user" ? "rgba(0,0,0,0.35)" : "rgba(6,13,26,0.8)",
+                        }}>
+                          {m.role === "assistant" && i > 0 && (
+                            <div style={{ position: "absolute", top: -6, left: -6, width: 13, height: 13, background: "var(--em)", borderRadius: 3, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <span style={{ fontSize: 7, color: "var(--bg)", fontWeight: 700 }}>!</span>
+                            </div>
+                          )}
+                          <div className="ea-prose">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                          </div>
+                          {m.role === "assistant" && i > 0 && (
+                            <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(0,255,163,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <span className="ea-label" style={{ fontSize: 7.5 }}>Sentinel_v3.3 // Verified</span>
+                              <button className="ea-btn-ghost" onClick={() => generatePDF(m.content)}>Export PDF</button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {loading && (
+                      <div className="ea-glass" style={{ padding: "20px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+                        {[100, 85, 65].map((w, i) => (
+                          <div key={i} style={{ height: 8, background: "rgba(0,255,163,0.08)", borderRadius: 4, width: `${w}%`, animation: `dot-pulse 1.5s ${i * 0.1}s infinite` }} />
+                        ))}
+                        <span className="ea-label" style={{ fontSize: 7.5, color: "rgba(0,255,163,0.5)", marginTop: 4, animation: "dot-pulse 1.5s infinite" }}>Forensic analysis in progress...</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── ACQUISITION TARGETS ── */}
+                {activeTab === "lead" && (
+                  <div style={{ maxWidth: 860, margin: "0 auto" }}>
+                    <h2 style={{ fontFamily: "var(--display)", fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", borderLeft: "2px solid var(--ok)", paddingLeft: 12, marginBottom: 20, color: "var(--ok)" }}>
+                      Acquisition Targets ({leads.length})
+                    </h2>
+                    {!leads.length ? (
+                      <div className="ea-glass" style={{ padding: "32px", textAlign: "center" }}>
+                        <p className="ea-label" style={{ fontSize: 9 }}>No acquisition targets in system pool.</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                        {leads.map((l, i) => (
+                          <div key={i} className="ea-glass ea-fadeup" style={{ padding: "14px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", animationDelay: `${i * 0.06}s` }}
+                            onMouseEnter={(e) => (e.currentTarget.style.borderColor = "rgba(0,200,83,0.3)")}
+                            onMouseLeave={(e) => (e.currentTarget.style.borderColor = "rgba(0,255,163,0.10)")}>
+                            <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                              <div style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--ok)", boxShadow: "0 0 10px var(--ok)" }} />
+                              <div>
+                                <p style={{ fontFamily: "var(--mono)", fontSize: 8.5, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", color: "var(--ok)", marginBottom: 3 }}>{l.audit_verdict}</p>
+                                <p style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700 }}>{l.location_data} — <span style={{ opacity: .4 }}>{l.target_value}</span></p>
+                              </div>
+                            </div>
+                            <button className="ea-btn-ghost" onClick={() => generatePDF(l.output_text || "")}>Extract</button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── SMART CONTRACTS ── */}
+                {activeTab === "contract" && (
+                  <div style={{ maxWidth: 860, margin: "0 auto" }}>
+                    <h2 style={{ fontFamily: "var(--display)", fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", borderLeft: "2px solid var(--em)", paddingLeft: 12, marginBottom: 20 }}>
+                      Smart Contract Protocols
+                    </h2>
+                    <div className="ea-glass" style={{ padding: "20px", borderColor: "rgba(0,255,163,0.2)", background: "rgba(0,255,163,0.04)" }}>
+                      <span className="ea-label" style={{ fontSize: 8.5, color: "var(--em)", display: "block", marginBottom: 8 }}>Escrow Engine Status</span>
+                      <p style={{ fontFamily: "var(--serif)", fontSize: 12, opacity: .5, lineHeight: 1.6 }}>
+                        System awaiting formal parameter extraction confirmation to allocate smart pipeline escrow deployments.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── CASE ARCHIVE ── */}
+                {activeTab === "history" && (
+                  <div style={{ maxWidth: 860, margin: "0 auto" }}>
+                    <h2 style={{ fontFamily: "var(--display)", fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", borderLeft: "2px solid rgba(214,240,228,0.4)", paddingLeft: 12, marginBottom: 20 }}>
+                      Case Archive ({history.length})
+                    </h2>
+                    {!history.length ? (
+                      <div className="ea-glass" style={{ padding: 32, textAlign: "center" }}>
+                        <p className="ea-label" style={{ fontSize: 9 }}>Historical query stack is empty.</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                        {history.map((h, i) => (
+                          <div key={i} className="ea-glass ea-fadeup" style={{ padding: "18px", position: "relative", animationDelay: `${i * 0.05}s` }}>
+                            <div style={{ position: "absolute", top: 14, right: 14, display: "flex", gap: 12, alignItems: "center" }}>
+                              <span style={{ fontFamily: "var(--mono)", fontSize: 8.5, opacity: .3 }}>{new Date(h.created_at).toLocaleDateString()}</span>
+                              <button className="ea-btn-ghost" onClick={() => generatePDF(h.output_text)}>Download</button>
+                            </div>
+                            <div className="ea-prose" style={{ marginTop: 4 }}>
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{h.output_text}</ReactMarkdown>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── DARK POOL ── */}
+                {activeTab === "darkpool" && (
+                  <div style={{ maxWidth: 860, margin: "0 auto" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20 }}>
+                      <h2 style={{ fontFamily: "var(--display)", fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", borderLeft: "2px solid #FF4D2E", paddingLeft: 12, color: "#FF4D2E" }}>
+                        Dark Pool ({darkPoolDeals.length})
+                      </h2>
+                      <button className="ea-btn-danger" onClick={fetchDarkPool} disabled={darkPoolLoading}>
+                        {darkPoolLoading ? "SCANNING..." : "◉ RE-SCAN"}
+                      </button>
+                    </div>
+                    {!darkPoolDeals.length ? (
+                      <div className="ea-glass" style={{ padding: 40, textAlign: "center" }}>
+                        <div style={{ fontSize: 36, opacity: .15, marginBottom: 12 }}>🔒</div>
+                        <p className="ea-label" style={{ fontSize: 9, marginBottom: 6 }}>No off-market opportunities detected.</p>
+                        <p className="ea-label" style={{ fontSize: 8, opacity: .5 }}>Enter location to scan developer CRMs, court auctions, and broker networks.</p>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {darkPoolDeals.map((deal, i) => (
+                          <div key={deal.id} className="ea-glass ea-dp-card ea-fadeup" style={{ border: "1px solid rgba(255,77,46,0.2)", background: "rgba(255,77,46,0.04)", animationDelay: `${i * 0.07}s`, position: "relative" }}>
+                            <div style={{ position: "absolute", top: 0, right: 0, padding: "5px 12px", background: "#FF4D2E", borderRadius: "0 10px 0 6px", fontFamily: "var(--mono)", fontSize: 8, fontWeight: 700, color: "var(--bg)", letterSpacing: ".15em" }}>
+                              {deal.type}
+                            </div>
+                            <div style={{ padding: "16px" }}>
+                              <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                                <div style={{ width: 40, height: 40, background: "rgba(255,77,46,0.1)", border: "1px solid rgba(255,77,46,0.2)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, flexShrink: 0 }}>
+                                  {deal.type === "PRE_LAUNCH" ? "🚀" : deal.type === "DISTRESSED" ? "⚡" : "🔥"}
+                                </div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                                    <span style={{ fontFamily: "var(--mono)", fontSize: 8.5, fontWeight: 700, color: "#FF4D2E", letterSpacing: ".1em" }}>{deal.id}</span>
+                                    <span style={{ opacity: .25, fontSize: 8 }}>|</span>
+                                    <span style={{ fontFamily: "var(--mono)", fontSize: 8, opacity: .3, textTransform: "uppercase" }}>{deal.source}</span>
+                                  </div>
+                                  <p style={{ fontFamily: "var(--mono)", fontSize: 11, fontWeight: 700, marginBottom: 8, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                    {deal.location} — <span style={{ opacity: .4 }}>{deal.propertyType}</span>
+                                  </p>
+                                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+                                    <span style={{ padding: "4px 10px", background: "#FF4D2E", color: "var(--bg)", fontFamily: "var(--mono)", fontSize: 9.5, fontWeight: 700, borderRadius: 5 }}>
+                                      {deal.discount}% OFF MARKET
+                                    </span>
+                                    {deal.minInvestment && <span style={{ fontFamily: "var(--mono)", fontSize: 8.5, opacity: .5 }}>Min: {deal.minInvestment}</span>}
+                                  </div>
+                                  {deal.reason && <p style={{ fontFamily: "var(--mono)", fontSize: 8, color: "#FF4D2E", opacity: .8 }}>{deal.reason}</p>}
+                                  {deal.expiresAt && (
+                                    <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 6 }}>
+                                      <div style={{ width: 5, height: 5, borderRadius: "50%", background: "#FF4D2E", animation: "dot-pulse 1.5s infinite" }} />
+                                      <span style={{ fontFamily: "var(--mono)", fontSize: 8, color: "#FF4D2E", fontWeight: 700 }}>
+                                        Expires {new Date(deal.expiresAt).toLocaleDateString()}
+                                      </span>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ padding: "8px 16px", borderTop: "1px solid rgba(255,77,46,0.1)", display: "flex", justifyContent: "space-between", alignItems: "center", background: "rgba(0,0,0,0.2)" }}>
+                              <span className="ea-label" style={{ fontSize: 7 }}>Off-Market Access Required</span>
+                              <button className="ea-btn-danger" style={{ padding: "5px 12px", fontSize: 8 }}>REQUEST ACCESS</button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── PORTFOLIO INTEL ── */}
+                {activeTab === "portfolio" && (
+                  <div style={{ maxWidth: 860, margin: "0 auto" }}>
+                    <h2 style={{ fontFamily: "var(--display)", fontSize: 12, fontWeight: 700, letterSpacing: ".1em", textTransform: "uppercase", borderLeft: "2px solid var(--ok)", paddingLeft: 12, marginBottom: 20, color: "var(--ok)" }}>
+                      Portfolio Intelligence
+                    </h2>
+                    {!portfolioAnalysis ? (
+                      <div className="ea-glass" style={{ padding: 28 }}>
+                        <p className="ea-label" style={{ fontSize: 8.5, marginBottom: 12 }}>Upload portfolio JSON for analysis</p>
+                        <textarea
+                          value={portfolioJson}
+                          onChange={(e) => setPortfolioJson(e.target.value)}
+                          placeholder='[{"id":"V1","location":"dubai","propertyType":"villa","currentValue":5000000,"purchasePrice":4000000,"yield":5.5,"riskScore":4}]'
+                          rows={5}
+                          style={{
+                            ...inputStyle, height: "auto", resize: "vertical", marginBottom: 12,
+                            color: "var(--text)", background: "rgba(0,0,0,0.5)", fontSize: 10, lineHeight: 1.5,
+                          }}
+                        />
+                        <button className="ea-btn-primary" onClick={handlePortfolioUpload}>ANALYZE PORTFOLIO</button>
+                      </div>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                        {/* metrics grid */}
+                        <div className="ea-glass" style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", overflow: "hidden" }}>
+                          {[
+                            { l: "Total Value", v: `$${(portfolioAnalysis.portfolioMetrics.totalValue / 1e6).toFixed(1)}M`, c: "var(--text)" },
+                            { l: "Avg Yield",   v: `${portfolioAnalysis.portfolioMetrics.avgYield.toFixed(1)}%`, c: "var(--ok)" },
+                            { l: "Risk Score",  v: `${portfolioAnalysis.portfolioMetrics.avgRisk.toFixed(1)}/10`, c: portfolioAnalysis.portfolioMetrics.avgRisk > 6 ? "#FF4D2E" : "#FFB800" },
+                            { l: "Diversification", v: `${portfolioAnalysis.portfolioMetrics.diversificationScore.toFixed(1)}/10`, c: "var(--ok)" },
+                          ].map((m, i) => (
+                            <div key={i} style={{ padding: "14px 16px", borderRight: i < 3 ? "1px solid rgba(0,255,163,0.1)" : "none" }}>
+                              <div className="ea-label" style={{ fontSize: 7.5, marginBottom: 6 }}>{m.l}</div>
+                              <div style={{ fontFamily: "var(--mono)", fontSize: 20, fontWeight: 700, color: m.c }}>{m.v}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* rebalance signals */}
+                        {portfolioAnalysis.rebalanceSignals.length > 0 && (
+                          <div className="ea-glass" style={{ borderColor: "rgba(255,77,46,0.2)", background: "rgba(255,77,46,0.04)", padding: "14px 16px" }}>
+                            <div className="ea-label" style={{ fontSize: 8, color: "rgba(255,77,46,0.7)", marginBottom: 10 }}>
+                              Rebalance Signals ({portfolioAnalysis.rebalanceSignals.length})
+                            </div>
+                            {portfolioAnalysis.rebalanceSignals.map((sig: any, i: number) => (
+                              <div key={i} className="ea-glass" style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", marginBottom: 6, background: "rgba(0,0,0,0.3)" }}>
+                                <div style={{ width: 6, height: 6, borderRadius: "50%", background: sig.action === "SELL" ? "#FF4D2E" : sig.action === "REDUCE" ? "#FF6B00" : "#FFB800", flexShrink: 0 }} />
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ display: "flex", gap: 6, marginBottom: 2 }}>
+                                    <span style={{ fontFamily: "var(--mono)", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>{sig.action}</span>
+                                    <span style={{ fontFamily: "var(--mono)", fontSize: 8, opacity: .35 }}>{sig.assetId}</span>
+                                  </div>
+                                  <p style={{ fontFamily: "var(--mono)", fontSize: 8, opacity: .5 }}>{sig.reason}</p>
+                                </div>
+                                <span style={{ padding: "3px 8px", borderRadius: 4, fontFamily: "var(--mono)", fontSize: 7.5, fontWeight: 700, background: sig.urgency === "IMMEDIATE" ? "#FF4D2E" : sig.urgency === "30_DAYS" ? "#FF6B00" : "#FFB800", color: "var(--bg)" }}>
+                                  {sig.urgency}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ── CHAT INPUT ── */}
+              {activeTab === "description" && (
+                <div style={{ flexShrink: 0, padding: "12px 20px", borderTop: "1px solid rgba(0,255,163,0.09)", background: "rgba(3,5,14,0.85)", backdropFilter: "blur(16px)", position: "relative" }}>
+                  <div className="ea-scan-line" id="chat-scan" style={{ position: "absolute", top: 0, left: 0, right: 0 }} />
+                  <div style={{ maxWidth: 860, margin: "0 auto", display: "flex", gap: 10, alignItems: "center" }}>
+                    <div style={{ flex: 1, position: "relative" }}>
+                      <input
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        onFocus={(e) => {
+                          setInputFocused(true);
+                          (e.target.closest("div")?.previousSibling as HTMLElement)?.classList?.add("ea-scan-active");
+                        }}
+                        onBlur={(e) => {
+                          setInputFocused(false);
+                        }}
+                        onKeyDown={(e) => e.key === "Enter" && handleAction(undefined, false, e, "CHAT_COMMAND")}
+                        placeholder="Enter forensic command…"
+                        className="ea-input"
+                        style={{ paddingRight: 38 }}
+                      />
+                      {inputFocused && (
+                        <div style={{
+                          position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)",
+                          width: 2, height: 14, background: "var(--em)", borderRadius: 1,
+                          animation: "cursor-blink 1s step-end infinite",
+                        }} />
+                      )}
+                    </div>
+                    <button className="ea-btn-primary"
+                      onClick={(e) => handleAction(undefined, false, e, "CHAT_COMMAND")}
+                      disabled={loading || !chatInput.trim()}
+                      style={{ whiteSpace: "nowrap", padding: "11px 22px" }}>
+                      TRANSMIT
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      </main>
-    </div>
+        </main>
+      </div>
+    </>
   );
 }
