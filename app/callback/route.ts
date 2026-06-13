@@ -22,22 +22,17 @@ export async function GET(request: NextRequest) {
               cookiesToSet.forEach(({ name, value, options }) =>
                 cookieStore.set(name, value, options)
               );
-            } catch {
-              // Server component middleware can ignore this
-            }
+            } catch {}
           },
         },
       }
     );
 
     const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (error) {
-      console.error("Auth exchange error:", error.message);
-      return NextResponse.redirect(`${origin}/auth/login?error=auth_exchange_failed`);
+    if (!error) {
+      return NextResponse.redirect(`${origin}${next}`);
     }
-
-    return NextResponse.redirect(`${origin}${next}`);
   }
 
-  return NextResponse.redirect(`${origin}/auth/login?error=no_code`);
+  return NextResponse.redirect(`${origin}/auth/login?error=auth_callback_failed`);
 }
