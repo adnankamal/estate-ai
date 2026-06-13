@@ -18,14 +18,16 @@ export async function middleware(request: NextRequest) {
           return request.cookies.getAll();
         },
         setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => {
+          cookiesToSet.forEach(({ name, value, options }) => {
             request.cookies.set(name, value);
           });
+          
           response = NextResponse.next({
             request: {
               headers: request.headers,
             },
           });
+          
           cookiesToSet.forEach(({ name, value, options }) => {
             response.cookies.set(name, value, options);
           });
@@ -34,20 +36,24 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const { data: { user } } = await supabase.auth.getUser();
+  // ✅ CRITICAL: Refresh session
+  const { data: { user }, error } = await supabase.auth.getUser();
 
-  // Protect dashboard routes
-  if (request.nextUrl.pathname.startsWith("/dashboard") && !user) {
-    return NextResponse.redirect(new URL("/login", request.url));
+  if (error) {
+    console.error("Middleware auth error:", error.message);
+  }
+
+  // Protect dashboard
+  if (request.nextUrl.pathname.startsWith("/dashboard")) {
+    if (!user) {
+      console.log("No user, redirecting to login");
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
   }
 
   return response;
 }
 
 export const config = {
-  matcher: [
-    "/dashboard/:path*",
-    "/auth/callback",
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
-  ],
+  matcher: ["/dashboard/:path*", "/auth/callback"],
 };

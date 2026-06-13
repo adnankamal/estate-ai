@@ -4,6 +4,24 @@ import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabaseClient"; 
 import jsPDF from "jspdf";
+import { createClient } from "@/lib/supabaseServer";
+import { redirect } from "next/navigation";
+
+export default async function DashboardPage() {
+  const supabase = await createClient();
+  const { data: { user }, error } = await supabase.auth.getUser();
+
+  if (error || !user) {
+    redirect("/login");
+  }
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>{user.email}</p>
+    </div>
+  );
+}
 
 const ReactMarkdown: any = dynamic(() => import("react-markdown"), { ssr: false });
 const remarkGfm: any = dynamic(() => import("remark-gfm"), { ssr: false });
@@ -515,7 +533,6 @@ function FutureScoreCard({ currentScore, futureScore, verdict }: {
 }
 
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
-export default function Dashboard() {
   const router = useRouter();
   const scrollRef = useRef<any>(null);
   const mounted = useClientOnly();
