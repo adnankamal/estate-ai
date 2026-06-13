@@ -5,10 +5,8 @@ import dynamic from "next/dynamic";
 import { supabase } from "../../lib/supabaseClient"; 
 import jsPDF from "jspdf";
 
-
 const ReactMarkdown: any = dynamic(() => import("react-markdown"), { ssr: false });
 const remarkGfm: any = dynamic(() => import("remark-gfm"), { ssr: false });
-
 const SatelliteMap = dynamic(() => import("../components/SatelliteMap"), {
   ssr: false,
   loading: () => (
@@ -18,7 +16,6 @@ const SatelliteMap = dynamic(() => import("../components/SatelliteMap"), {
     </div>
   ),
 });
-
 // ─── GLOBAL STYLES ───────────────────────────────────────────────────────────
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,wght@0,400;1,400&family=Inter:wght@400;600&display=swap');
@@ -518,6 +515,18 @@ function FutureScoreCard({ currentScore, futureScore, verdict }: {
 // ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function Dashboard() {
   const router = useRouter();
+  
+  // ✅ AUTH CHECK — pehle run hoga
+  useEffect(() => {
+    const checkAuth = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        router.replace("/login");
+      }
+    };
+    checkAuth();
+  }, [router]);
+  
   const scrollRef = useRef<any>(null);
   const mounted = useClientOnly();
 
@@ -534,7 +543,6 @@ export default function Dashboard() {
     "[INITIALIZING] Sentinel Core v3.3",
     "[OK] Encryption Layer Verified",
   ]);
-
   const [scoreState, setScoreState] = useState<number | string>(0);
   const [varianceState, setVarianceState] = useState<number | string>(0);
   const [yieldState, setYieldState] = useState<number>(0);
@@ -562,10 +570,15 @@ export default function Dashboard() {
   ]);
 
   // auth check
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) router.push("/");
-      else { setUserEmail(user.email ?? null); setUserId(user.id); }
+useEffect(() => {
+    supabase.auth.getUser().then(({ data }: { data: { user: any } }) => {
+      const user = data.user;
+      if (!user) {
+        router.push("/");
+      } else {
+        setUserEmail(user.email ?? null);
+        setUserId(user.id);
+      }
     });
   }, [router]);
 

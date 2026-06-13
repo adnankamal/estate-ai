@@ -1,18 +1,17 @@
-import { createClient } from '@supabase/supabase-js';
+import { createBrowserClient } from "@supabase/ssr";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// Ensure environment variables exist
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error("Missing Supabase environment variables");
-}
+// ✅ SINGLETON — ek hi instance
+let client: ReturnType<typeof createBrowserClient> | null = null;
 
-export const supabase = createClient(supabaseUrl, supabaseKey, {
-  auth: {
-    persistSession: true,
-    autoRefreshToken: true,
-    detectSessionInUrl: true,
-    storageKey: 'sb-estate-ai-auth', // Custom key
-  },
-});
+export const getSupabaseClient = () => {
+  if (!client) {
+    client = createBrowserClient(supabaseUrl, supabaseKey);
+  }
+  return client;
+};
+
+// ✅ Default export
+export const supabase = getSupabaseClient();

@@ -1,6 +1,6 @@
+import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { createServerClient } from "@supabase/ssr";
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
@@ -8,6 +8,7 @@ export async function GET(request: Request) {
 
   if (code) {
     const cookieStore = await cookies();
+    
     const supabase = createServerClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -18,14 +19,26 @@ export async function GET(request: Request) {
           },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
-              cookieStore.set(name, value, options);
+              // ✅ CRITICAL: Cookie options
+              cookieStore.set(name, value, {
+                ...options,
+                sameSite: "lax",
+                secure: false, // Local mein false, production mein true
+                path: "/",
+                maxAge: 60 * 60 * 24 * 7, // 7 days
+              });
             });
           },
         },
       }
     );
-    await supabase.auth.exchangeCodeForSession(code);
+
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    
+    if (!error) {
+      return NextResponse.redirect(`${origin}/dashboard`);
+    }
   }
 
-  return NextResponse.redirect(`${origin}/dashboard`);
+  return NextResponse.redirect(`${origin}/login?error=auth_failed`);
 }
