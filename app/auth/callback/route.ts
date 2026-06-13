@@ -34,5 +34,5 @@ export async function GET(request: Request) {
   }
 
   // Verification fail hone par error page ya login par wapas bhejo
-  return NextResponse.redirect(`${origin}/auth/auth-error`);
+  return NextResponse.redirect(`${origin}/?error=auth-failed`);
 }
