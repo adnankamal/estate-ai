@@ -3,7 +3,7 @@
 import { useState, useRef, useMemo } from "react";
 import { createBrowserClient } from '@supabase/ssr';
 
-// --- UI Components remain the same ---
+// --- UI Components ---
 const AURORA_ORBS = [
   { cx: "15%", cy: "20%", r: 320, color: "#00FFA3", opacity: 0.045, dur: 18 },
   { cx: "80%", cy: "75%", r: 280, color: "#00FFA3", opacity: 0.035, dur: 22 },
@@ -73,7 +73,7 @@ function ScanLine({ active }: { active: boolean }) {
   );
 }
 
-export default function AuthPortal() {
+export default function LoginPage() {
   // Use memoization for the Supabase client
   const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -99,14 +99,13 @@ export default function AuthPortal() {
     const dy = (e.clientY - cy) / (rect.height / 2);
     setTilt({ x: -dy * 4, y: dx * 4 });
   };
-
+  
   const handleMouseLeave = () => {
     setTilt({ x: 0, y: 0 });
     setHovered(false);
   };
 
-  // --- SINGLE SOURCE OF TRUTH ---
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
 
@@ -121,6 +120,7 @@ export default function AuthPortal() {
     });
 
     if (error) {
+      console.error("Login error:", error.message);
       setError(error.message);
       setLoading(false);
     } else {
@@ -165,7 +165,7 @@ export default function AuthPortal() {
           <div style={{ height: 1, background: "linear-gradient(to right, transparent, rgba(0,255,163,0.15) 40%, rgba(0,255,163,0.15) 60%, transparent)", marginBottom: "1.5rem" }} />
 
           {!submitted ? (
-            <form onSubmit={handleSubmit} style={{ animation: "fadeUp 0.6s 0.4s both" }}>
+            <form onSubmit={handleLogin} style={{ animation: "fadeUp 0.6s 0.4s both" }}>
               <div className="mb-5">
                 <label style={{ display: "block", fontFamily: "monospace", fontSize: 9, letterSpacing: "0.28em", color: "rgba(0,255,163,0.4)", textTransform: "uppercase", marginBottom: 8 }}>Operator Identity</label>
                 <div style={{ position: "relative" }}>
