@@ -105,26 +105,35 @@ export default function LoginPage() {
     setHovered(false);
   };
 
+  // ✅ GOOGLE LOGIN HANDLER
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: "https://estate-ai-kr85.vercel.app/auth/callback",
+      },
+    });
+  };
+
+  // ✅ EMAIL LOGIN HANDLER (Optional - agar rakhna hai toh)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
 
     setLoading(true);
     setError(null);
-const handleGoogleLogin = async () => {
-  await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: "https://estate-ai-kr85.vercel.app/auth/callback",
-    },
-  });
-};
 
-// Button:
-<button onClick={handleGoogleLogin}>Sign in with Google</button>
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: "https://estate-ai-kr85.vercel.app/auth/callback",
+      },
+    });
+
     if (error) {
-  console.error("Login error:", String(error));
-setError(String(error));  
+      console.error("Login error:", String(error));
+      setError(String(error));
       setLoading(false);
     } else {
       setSubmitted(true);
@@ -167,6 +176,48 @@ setError(String(error));
 
           <div style={{ height: 1, background: "linear-gradient(to right, transparent, rgba(0,255,163,0.15) 40%, rgba(0,255,163,0.15) 60%, transparent)", marginBottom: "1.5rem" }} />
 
+          {/* ✅ GOOGLE LOGIN BUTTON */}
+          <button 
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            style={{ 
+              width: "100%", 
+              padding: "0.85rem", 
+              background: "linear-gradient(135deg, rgba(66, 133, 244, 0.9), rgba(66, 133, 244, 0.7))", 
+              border: "1px solid rgba(66, 133, 244, 0.25)", 
+              borderRadius: 8, 
+              color: "#fff", 
+              fontFamily: "monospace", 
+              fontSize: 11, 
+              fontWeight: 700, 
+              letterSpacing: "0.22em", 
+              textTransform: "uppercase", 
+              cursor: loading ? "default" : "pointer", 
+              opacity: loading ? 0.6 : 1, 
+              transition: "all 0.25s", 
+              boxShadow: "0 0 24px rgba(66, 133, 244, 0.2)",
+              marginBottom: "1rem"
+            }}
+          >
+            {loading ? "Connecting..." : "Sign in with Google"}
+          </button>
+
+          {/* Divider */}
+          <div style={{ 
+            display: "flex", 
+            alignItems: "center", 
+            marginBottom: "1rem",
+            color: "rgba(0,255,163,0.3)",
+            fontFamily: "monospace",
+            fontSize: 9,
+            letterSpacing: "0.2em"
+          }}>
+            <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
+            <span style={{ padding: "0 10px" }}>OR</span>
+            <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
+          </div>
+
+          {/* Email Form */}
           {!submitted ? (
             <form onSubmit={handleLogin} style={{ animation: "fadeUp 0.6s 0.4s both" }}>
               <div className="mb-5">
