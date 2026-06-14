@@ -19,13 +19,13 @@ export async function GET(request: Request) {
           },
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
-              // ✅ CRITICAL: Cookie options
               cookieStore.set(name, value, {
                 ...options,
                 sameSite: "lax",
-                secure: false, // Local mein false, production mein true
+                secure: process.env.NODE_ENV === "production", // ✅ Local mein false
                 path: "/",
-                maxAge: 60 * 60 * 24 * 7, // 7 days
+                maxAge: 60 * 60 * 24 * 7,
+                httpOnly: true,
               });
             });
           },
@@ -33,12 +33,28 @@ export async function GET(request: Request) {
       }
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    // ✅ EXCHANGE CODE
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     
-    if (!error) {
+    if (error) {
+      console.error("Auth exchange error:", error.message);
+      return NextResponse.redirect(`${origin}/login?error=auth_exchange_failed`);
+    }
+
+    // ✅ DEBUG: Log cookies
+    console.log("Session set:", data.session?.user?.email);
+    console.log("Cookies after set:", cookieStore.getAll().map(c => c.name));
+
+    // ✅ CRITICAL: Small delay to ensure cookie propagation
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // ✅ VERIFY SESSION BEFORE REDIRECT
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (session) {
       return NextResponse.redirect(`${origin}/dashboard`);
     }
   }
 
-  return NextResponse.redirect(`${origin}/auth/login?error=auth_failed`);
+  return NextResponse.redirect(`${origin}/login?error=auth_failed`);
 }

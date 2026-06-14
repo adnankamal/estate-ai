@@ -512,21 +512,52 @@ function FutureScoreCard({ currentScore, futureScore, verdict }: {
   );
 }
 
-// ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
+/// ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
 export default function Dashboard() {
   const router = useRouter();
-  
-  // ✅ AUTH CHECK — pehle run hoga
+
+  const [authChecked, setAuthChecked] = useState(false);
+  const [authLoading, setAuthLoading] = useState(true);
+
   useEffect(() => {
     const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.replace("/login");
+      let retries = 3;
+      let session = null;
+
+      while (retries > 0 && !session) {
+        const { data } = await supabase.auth.getSession();
+        session = data.session;
+
+        if (!session) {
+          console.log(`Retry ${4 - retries}/3...`);
+          await new Promise(resolve => setTimeout(resolve, 800));
+          retries--;
+        }
       }
+
+      if (!session) {
+        console.log("No session after retries, redirecting...");
+        router.replace("/login");
+        return;
+      }
+
+      console.log("Session found:", session.user.email);
+      setAuthChecked(true);
+      setAuthLoading(false);
     };
+
     checkAuth();
   }, [router]);
-  
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-green-400 font-mono text-sm animate-pulse">
+          [AUTHENTICATING...]
+        </div>
+      </div>
+    );
+  }
   const scrollRef = useRef<any>(null);
   const mounted = useClientOnly();
 
@@ -952,7 +983,7 @@ useEffect(() => {
                           <div key={i} style={{ height: 8, background: "rgba(0,255,163,0.08)", borderRadius: 4, width: `${w}%`, animation: `dot-pulse 1.5s ${i * 0.1}s infinite` }} />
                         ))}
                         <span className="text-yellow-400">● DATA_INSUFFICIENT</span>
-<span className="text-xs text-gray-500 ml-2">Source Provenance: FALSE</span>
+                        <span className="text-xs text-gray-500 ml-2">Source Provenance: FALSE</span>
                       </div>
                     )}
                   </div>
