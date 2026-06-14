@@ -111,14 +111,12 @@ export default function LoginPage() {
 
     setLoading(true);
     setError(null);
-
-    const { error } = await supabase.auth.signInWithOtp({
-      email: email,
-      options: {
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
-      },
-    });
-
+const { error } = await supabase.auth.signInWithOAuth({
+  provider: 'google',
+  options: {
+    redirectTo: `${window.location.origin}/auth/callback`,
+  },
+});
     if (error) {
       console.error("Login error:", error.message);
       setError(error.message);
