@@ -16,6 +16,47 @@ const SatelliteMap = dynamic(() => import("../components/SatelliteMap"), {
     </div>
   ),
 });
+
+// ✅ AUTH GUARD — alag component, no hooks conflict
+function AuthGuard({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      let retries = 3;
+      let session = null;
+
+      while (retries > 0 && !session) {
+        const { data } = await supabase.auth.getSession();
+        session = data.session;
+        if (!session) {
+          await new Promise(resolve => setTimeout(resolve, 800));
+          retries--;
+        }
+      }
+
+      if (!session) {
+        router.replace("/login");
+        return;
+      }
+      setLoading(false);
+    };
+    checkAuth();
+  }, [router]);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-green-400 font-mono text-sm animate-pulse">
+          [AUTHENTICATING...]
+        </div>
+      </div>
+    );
+  }
+
+  return <>{children}</>;
+}
 // ─── GLOBAL STYLES ───────────────────────────────────────────────────────────
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,wght@0,400;1,400&family=Inter:wght@400;600&display=swap');
@@ -512,55 +553,24 @@ function FutureScoreCard({ currentScore, futureScore, verdict }: {
   );
 }
 
-/// ─── MAIN DASHBOARD ──────────────────────────────────────────────────────────
-export default function Dashboard() {
-  const router = useRouter();
-
-  const [authChecked, setAuthChecked] = useState(false);
-  const [authLoading, setAuthLoading] = useState(true);
-
+// ✅ TERA SARA ORIGINAL CODE — hooks order fix, no early return
+export default function DashboardContent() {
+  const router = useRouter();  // ✅ ADD
+  
+  // ✅ AUTH CHECK — TOP PE, RETURN SE PEHLE
   useEffect(() => {
-    const checkAuth = async () => {
-      let retries = 3;
-      let session = null;
-
-      while (retries > 0 && !session) {
-        const { data } = await supabase.auth.getSession();
-        session = data.session;
-
-        if (!session) {
-          console.log(`Retry ${4 - retries}/3...`);
-          await new Promise(resolve => setTimeout(resolve, 800));
-          retries--;
-        }
+    supabase.auth.getUser().then(({ data }: { data: { user: { email: string | null; id: string } | null } | null }) => {
+      if (!data?.user) {
+        router.push("/");
+      } else {
+        setUserEmail(data.user.email ?? null);
+        setUserId(data.user.id);
       }
-
-      if (!session) {
-        console.log("No session after retries, redirecting...");
-        router.replace("/login");
-        return;
-      }
-
-      console.log("Session found:", session.user.email);
-      setAuthChecked(true);
-      setAuthLoading(false);
-    };
-
-    checkAuth();
+    });
   }, [router]);
-
-  if (authLoading) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-green-400 font-mono text-sm animate-pulse">
-          [AUTHENTICATING...]
-        </div>
-      </div>
-    );
-  }
+  
   const scrollRef = useRef<any>(null);
   const mounted = useClientOnly();
-
   const [activeTab, setActiveTab] = useState("description");
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
