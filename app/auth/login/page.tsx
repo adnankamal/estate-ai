@@ -111,15 +111,20 @@ export default function LoginPage() {
 
     setLoading(true);
     setError(null);
-const { error } = await supabase.auth.signInWithOAuth({
-  provider: 'google',
-  options: {
-    redirectTo: `${window.location.origin}/auth/callback`,
-  },
-});
+const handleGoogleLogin = async () => {
+  await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: "https://estate-ai-kr85.vercel.app/auth/callback",
+    },
+  });
+};
+
+// Button:
+<button onClick={handleGoogleLogin}>Sign in with Google</button>
     if (error) {
-      console.error("Login error:", error.message);
-      setError(error.message);
+  console.error("Login error:", String(error));
+setError(String(error));  
       setLoading(false);
     } else {
       setSubmitted(true);
