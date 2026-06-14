@@ -1,8 +1,9 @@
 "use client";
+
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { supabase } from "../../lib/supabaseClient"; 
+import { supabase, getAuthStatus } from "../../lib/supabaseClient";
 import jsPDF from "jspdf";
 
 const ReactMarkdown: any = dynamic(() => import("react-markdown"), { ssr: false });
@@ -553,27 +554,95 @@ function FutureScoreCard({ currentScore, futureScore, verdict }: {
   );
 }
 
-// ✅ TERA SARA ORIGINAL CODE — hooks order fix, no early return
-export default function DashboardContent() {
-  const router = useRouter();  // ✅ ADD
-  
-  // ✅ AUTH CHECK — TOP PE, RETURN SE PEHLE
+
+/**
+ * Dashboard Component
+ * Production-grade auth with retry logic
+ */
+export default function Dashboard() {
+  const router = useRouter();
+  const [authState, setAuthState] = useState<{
+    status: "loading" | "authenticated" | "unauthenticated" | "error";
+    user: any | null;
+  }>({ status: "loading", user: null });
+
+  // ✅ PROFESSIONAL AUTH CHECK
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }: { data: { user: { email: string | null; id: string } | null } | null }) => {
-      if (!data?.user) {
-        router.push("/");
-      } else {
-        setUserEmail(data.user.email ?? null);
-        setUserId(data.user.id);
+    let mounted = true;
+    
+    const verifyAuth = async () => {
+      console.log("[DASHBOARD] Starting auth verification...");
+      
+      const { status, user, error } = await getAuthStatus(3, 800);
+      
+      if (!mounted) return;
+      
+      console.log(`[DASHBOARD] Auth status: ${status}`);
+      
+      if (status === "authenticated" && user) {
+        setAuthState({ status: "authenticated", user });
+      } else if (status === "unauthenticated") {
+        console.log("[DASHBOARD] Redirecting to login");
+        router.replace("/login");
+      } else if (status === "error") {
+        console.error("[DASHBOARD] Auth error:", error);
+        // Retry once more after longer delay
+        setTimeout(async () => {
+          const retry = await getAuthStatus(2, 1500);
+          if (!mounted) return;
+          
+          if (retry.status === "authenticated" && retry.user) {
+            setAuthState({ status: "authenticated", user: retry.user });
+          } else {
+            router.replace("/login");
+          }
+        }, 2000);
       }
-    });
+    };
+    
+    verifyAuth();
+    
+    return () => { mounted = false; };
   }, [router]);
-  
+
+  // ✅ LOADING STATE
+  if (authState.status === "loading") {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-green-400 font-mono text-sm animate-pulse mb-2">
+            [AUTHENTICATING...]
+          </div>
+          <div className="text-gray-600 font-mono text-xs">
+            Sentinel Core v3.3 // Establishing Secure Uplink
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ✅ ERROR STATE
+  if (authState.status === "error") {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="text-red-400 font-mono text-sm text-center">
+          <div className="mb-2">[AUTHENTICATION FAILED]</div>
+          <button 
+            onClick={() => router.push("/login")}
+            className="text-green-400 underline cursor-pointer"
+          >
+            Return to Login
+          </button>
+        </div>
+      </div>
+    );
+  }
+  // ✅ TERA SARA ORIGINAL CODE — BILKUL SAME
   const scrollRef = useRef<any>(null);
   const mounted = useClientOnly();
   const [activeTab, setActiveTab] = useState("description");
-  const [userEmail, setUserEmail] = useState<string | null>(null);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [userEmail, setUserEmail] = useState<string | null>(authState.user?.email ?? null);
+  const [userId, setUserId] = useState<string | null>(authState.user?.id ?? null);
   const [loading, setLoading] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [status, setStatus] = useState("SYSTEM_IDLE");
@@ -584,6 +653,7 @@ export default function DashboardContent() {
     "[INITIALIZING] Sentinel Core v3.3",
     "[OK] Encryption Layer Verified",
   ]);
+
   const [scoreState, setScoreState] = useState<number | string>(0);
   const [varianceState, setVarianceState] = useState<number | string>(0);
   const [yieldState, setYieldState] = useState<number>(0);

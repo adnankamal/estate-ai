@@ -1,12 +1,31 @@
+/**
+ * Auth Callback Handler
+ * Exchanges authorization code for session
+ * Sets httpOnly cookies with proper security flags
+ */
+
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+
+const COOKIE_OPTIONS = {
+  path: "/",
+  sameSite: "lax" as const,
+  secure: process.env.NODE_ENV === "production",
+  httpOnly: true,
+  maxAge: 60 * 60 * 24 * 7, // 7 days
+};
 
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
 
-  if (code) {
+  if (!code) {
+    console.error("[AUTH] No code provided");
+    return NextResponse.redirect(`${origin}/login?error=no_code`);
+  }
+
+  try {
     const cookieStore = await cookies();
     
     const supabase = createServerClient(
@@ -20,12 +39,8 @@ export async function GET(request: Request) {
           setAll(cookiesToSet) {
             cookiesToSet.forEach(({ name, value, options }) => {
               cookieStore.set(name, value, {
+                ...COOKIE_OPTIONS,
                 ...options,
-                sameSite: "lax",
-                secure: process.env.NODE_ENV === "production", // ✅ Local mein false
-                path: "/",
-                maxAge: 60 * 60 * 24 * 7,
-                httpOnly: true,
               });
             });
           },
@@ -33,28 +48,27 @@ export async function GET(request: Request) {
       }
     );
 
-    // ✅ EXCHANGE CODE
     const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     
     if (error) {
-      console.error("Auth exchange error:", error.message);
-      return NextResponse.redirect(`${origin}/login?error=auth_exchange_failed`);
+      console.error("[AUTH] Exchange failed:", error.message);
+      return NextResponse.redirect(`${origin}/login?error=exchange_failed`);
     }
 
-    // ✅ DEBUG: Log cookies
-    console.log("Session set:", data.session?.user?.email);
-    console.log("Cookies after set:", cookieStore.getAll().map(c => c.name));
+    if (!data.session) {
+      console.error("[AUTH] No session after exchange");
+      return NextResponse.redirect(`${origin}/login?error=no_session`);
+    }
 
-    // ✅ CRITICAL: Small delay to ensure cookie propagation
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // ✅ VERIFY SESSION BEFORE REDIRECT
-    const { data: { session } } = await supabase.auth.getSession();
+    console.log("[AUTH] Session established:", data.session.user.email);
     
-    if (session) {
-      return NextResponse.redirect(`${origin}/dashboard`);
-    }
-  }
+    // Small delay to ensure cookie propagation
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    return NextResponse.redirect(`${origin}/dashboard`);
 
-  return NextResponse.redirect(`${origin}/login?error=auth_failed`);
+  } catch (err) {
+    console.error("[AUTH] Unexpected error:", err);
+    return NextResponse.redirect(`${origin}/login?error=unknown`);
+  }
 }
