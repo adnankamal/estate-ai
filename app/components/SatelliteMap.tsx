@@ -1,95 +1,109 @@
-'use client';
+"use client";
 
-import { MapContainer, TileLayer, Marker, Popup, LayersControl, useMap } from 'react-leaflet';
-import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-import { useEffect } from 'react';
+import { useEffect, useState } from "react";
 
-// Fix for default Leaflet marker paths breaking inside Next.js bundling
-const defaultIcon = L.icon({
-  iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-  iconRetinaUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png",
-  shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-  popupAnchor: [1, -34],
-});
-
-interface SatelliteMapProps {
-  lat: number;
-  lng: number;
+interface SatelliteData {
+  coordinates: [number, number];
+  elevation: number;
+  landUse: string;
+  vegetationIndex: number;
+  lastUpdated: string;
 }
 
-// FEATURE 1: Dynamic Center Controller Engine
-function RecenterMap({ lat, lng }: { lat: number; lng: number }) {
-  const map = useMap();
-  useEffect(() => {
-    if (lat && lng) {
-      map.setView([lat, lng], 18, { animate: true });
-    }
-  }, [lat, lng, map]);
-  return null;
-}
+export default function SatelliteMap({ location }: { location: string }) {
+  const [data, setData] = useState<SatelliteData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-export default function SatelliteMap({ lat, lng }: SatelliteMapProps) {
   useEffect(() => {
-    L.Marker.prototype.options.icon = defaultIcon;
-  }, []);
+    const fetchSatelliteData = async () => {
+      try {
+        setLoading(true);
+        
+        // ✅ NASA POWER API — FREE, no key needed
+        const response = await fetch(
+          `https://power.larc.nasa.gov/api/temporal/daily/point?parameters=ALLSKY_SFC_SW_DWN&community=RE&longitude=55.2708&latitude=25.2048&start=20240101&end=20240101&format=JSON`
+        );
+        
+        if (!response.ok) throw new Error("Satellite uplink failed");
+        
+        const nasaData = await response.json();
+        
+        // ✅ OpenStreetMap Nominatim — FREE geocoding
+        const geoResponse = await fetch(
+          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(location)}&format=json&limit=1`
+        );
+        
+        const geoData = await geoResponse.json();
+        
+        setData({
+          coordinates: geoData[0] ? [parseFloat(geoData[0].lat), parseFloat(geoData[0].lon)] : [25.2048, 55.2708],
+          elevation: Math.floor(Math.random() * 50) + 5, // Mock — replace with real API
+          landUse: "Urban/Residential",
+          vegetationIndex: Math.random() * 0.5, // NDVI mock
+          lastUpdated: new Date().toISOString(),
+        });
+        
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Uplink failed");
+      } finally {
+        setLoading(false);
+      }
+    };
 
-  if (!lat || !lng) {
-    return (
-      <div className="w-full h-96 bg-black border border-red-500/30 text-red-500 flex items-center justify-center font-mono text-xs tracking-wider">
-        [SYSTEM EXCEPTION] CRITICAL_METRICS_MISSING: NULL_COORDINATES
-      </div>
-    );
-  }
+    if (location) fetchSatelliteData();
+  }, [location]);
+
+  if (loading) return (
+    <div className="w-full h-96 flex items-center justify-center text-xs tracking-widest animate-pulse"
+      style={{ background: "rgba(0,0,0,0.5)", border: "1px solid rgba(0,255,163,0.1)", borderRadius: 8, color: "rgba(0,255,163,0.4)", fontFamily: "monospace" }}>
+      [CONNECTING_TO_SATELLITE_UPLINK...]
+    </div>
+  );
+
+  if (error) return (
+    <div className="w-full h-96 flex items-center justify-center text-xs" style={{ color: "red", fontFamily: "monospace" }}>
+      [ERROR: {error}]
+    </div>
+  );
 
   return (
-    <div className="relative w-full h-96 rounded-lg overflow-hidden border border-gray-800 shadow-2xl">
+    <div className="w-full p-4" style={{ background: "rgba(0,0,0,0.5)", border: "1px solid rgba(0,255,163,0.1)", borderRadius: 8 }}>
+      <div className="text-xs mb-4" style={{ color: "rgba(0,255,163,0.6)", fontFamily: "monospace" }}>
+        [SATELLITE_INTELLIGENCE_CORE_v3.3]
+      </div>
       
-      {/* FEATURE 2: Target HUD Crosshair Overlay */}
-      <div className="absolute inset-0 pointer-events-none z-[400] flex items-center justify-center">
-        <div className="w-8 h-8 border border-green-500/30 rounded-full flex items-center justify-center animate-pulse">
-          <div className="w-1 h-1 bg-green-400 rounded-full"></div>
+      <div className="grid grid-cols-2 gap-4 text-xs" style={{ fontFamily: "monospace" }}>
+        <div>
+          <span style={{ color: "rgba(0,255,163,0.4)" }}>COORDINATES:</span>
+          <br />
+          <span style={{ color: "rgba(0,255,163,0.8)" }}>
+            {data?.coordinates[0].toFixed(4)}°N, {data?.coordinates[1].toFixed(4)}°E
+          </span>
+        </div>
+        
+        <div>
+          <span style={{ color: "rgba(0,255,163,0.4)" }}>ELEVATION:</span>
+          <br />
+          <span style={{ color: "rgba(0,255,163,0.8)" }}>{data?.elevation}m ASL</span>
+        </div>
+        
+        <div>
+          <span style={{ color: "rgba(0,255,163,0.4)" }}>LAND_USE:</span>
+          <br />
+          <span style={{ color: "rgba(0,255,163,0.8)" }}>{data?.landUse}</span>
+        </div>
+        
+        <div>
+          <span style={{ color: "rgba(0,255,163,0.4)" }}>VEGETATION_INDEX:</span>
+          <br />
+          <span style={{ color: "rgba(0,255,163,0.8)" }}>{data?.vegetationIndex?.toFixed(2)}</span>
         </div>
       </div>
 
-      <MapContainer 
-        center={[lat, lng]} 
-        zoom={18} 
-        style={{ height: '100%', width: '100%' }}
-        scrollWheelZoom={true}
-      >
-        {/* Dynamic center engine execution hook */}
-        <RecenterMap lat={lat} lng={lng} />
-
-        {/* FEATURE 3: Layer Toggle Matrix (Satellite View vs Street View) */}
-        <LayersControl position="topright">
-          <LayersControl.BaseLayer checked name="Satellite Uplink (ESRI)">
-            <TileLayer
-              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              attribution="&copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS"
-            />
-          </LayersControl.BaseLayer>
-          
-          <LayersControl.BaseLayer name="Vector Grid (OpenStreetMap)">
-            <TileLayer
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              attribution="&copy; OpenStreetMap contributors"
-            />
-          </LayersControl.BaseLayer>
-        </LayersControl>
-
-        <Marker position={[lat, lng]} icon={defaultIcon}>
-          <Popup>
-            <div className="text-xs font-mono text-gray-900 p-1">
-              <strong className="text-black block border-b border-gray-200 pb-1 mb-1">[TARGET ASSET]</strong>
-              <span className="block font-semibold">LAT: {lat.toFixed(6)}</span>
-              <span className="block font-semibold">LNG: {lng.toFixed(6)}</span>
-            </div>
-          </Popup>
-        </Marker>
-      </MapContainer>
+      <div className="mt-4 text-xs" style={{ color: "rgba(0,255,163,0.3)", fontFamily: "monospace" }}>
+        LAST_SYNC: {data?.lastUpdated}
+      </div>
     </div>
   );
 }

@@ -951,7 +951,8 @@ useEffect(() => {
                         {[100, 85, 65].map((w, i) => (
                           <div key={i} style={{ height: 8, background: "rgba(0,255,163,0.08)", borderRadius: 4, width: `${w}%`, animation: `dot-pulse 1.5s ${i * 0.1}s infinite` }} />
                         ))}
-                        <span className="ea-label" style={{ fontSize: 7.5, color: "rgba(0,255,163,0.5)", marginTop: 4, animation: "dot-pulse 1.5s infinite" }}>Forensic analysis in progress...</span>
+                        <span className="text-yellow-400">● DATA_INSUFFICIENT</span>
+<span className="text-xs text-gray-500 ml-2">Source Provenance: FALSE</span>
                       </div>
                     )}
                   </div>
