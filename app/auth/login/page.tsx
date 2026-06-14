@@ -74,7 +74,6 @@ function ScanLine({ active }: { active: boolean }) {
 }
 
 export default function LoginPage() {
-  // Use memoization for the Supabase client
   const supabase = useMemo(() => createBrowserClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -105,7 +104,7 @@ export default function LoginPage() {
     setHovered(false);
   };
 
-  // ✅ GOOGLE LOGIN HANDLER
+  // ✅ GOOGLE LOGIN — ALAG FUNCTION, BAHAR
   const handleGoogleLogin = async () => {
     setLoading(true);
     await supabase.auth.signInWithOAuth({
@@ -116,7 +115,7 @@ export default function LoginPage() {
     });
   };
 
-  // ✅ EMAIL LOGIN HANDLER (Optional - agar rakhna hai toh)
+  // ✅ EMAIL LOGIN — ALAG FUNCTION
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
@@ -176,7 +175,7 @@ export default function LoginPage() {
 
           <div style={{ height: 1, background: "linear-gradient(to right, transparent, rgba(0,255,163,0.15) 40%, rgba(0,255,163,0.15) 60%, transparent)", marginBottom: "1.5rem" }} />
 
-          {/* ✅ GOOGLE LOGIN BUTTON */}
+          {/* ✅ GOOGLE BUTTON — YAHAN ADD KAR */}
           <button 
             onClick={handleGoogleLogin}
             disabled={loading}
