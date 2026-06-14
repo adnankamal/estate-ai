@@ -140,8 +140,8 @@ export default function LoginPage() {
     }
   };
 
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center relative overflow-hidden" style={{ background: "#03050E" }} onMouseMove={handleMouseMove}>
+return (
+  <div className="min-h-screen w-full flex items-center justify-center relative overflow-hidden" style={{ background: "#03050E" }} onMouseMove={handleMouseMove}>
       <GridLines />
       <AuroraCanvas />
       <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 50%, transparent 40%, #03050E 100%)" }} />
@@ -176,41 +176,34 @@ export default function LoginPage() {
           <div style={{ height: 1, background: "linear-gradient(to right, transparent, rgba(0,255,163,0.15) 40%, rgba(0,255,163,0.15) 60%, transparent)", marginBottom: "1.5rem" }} />
 
           {/* ✅ GOOGLE BUTTON — YAHAN ADD KAR */}
-          <button 
-            onClick={handleGoogleLogin}
-            disabled={loading}
-            style={{ 
-              width: "100%", 
-              padding: "0.85rem", 
-              background: "linear-gradient(135deg, rgba(66, 133, 244, 0.9), rgba(66, 133, 244, 0.7))", 
-              border: "1px solid rgba(66, 133, 244, 0.25)", 
-              borderRadius: 8, 
-              color: "#fff", 
-              fontFamily: "monospace", 
-              fontSize: 11, 
-              fontWeight: 700, 
-              letterSpacing: "0.22em", 
-              textTransform: "uppercase", 
-              cursor: loading ? "default" : "pointer", 
-              opacity: loading ? 0.6 : 1, 
-              transition: "all 0.25s", 
-              boxShadow: "0 0 24px rgba(66, 133, 244, 0.2)",
-              marginBottom: "1rem"
-            }}
-          >
-            {loading ? "Connecting..." : "Sign in with Google"}
-          </button>
+         <button 
+          onClick={handleGoogleLogin}
+          disabled={loading}
+          style={{ 
+            width: "100%", 
+            padding: "0.85rem", 
+            background: "linear-gradient(135deg, #4285F4, #34A853)", 
+            border: "1px solid rgba(66, 133, 244, 0.25)", 
+            borderRadius: 8, 
+            color: "#fff", 
+            fontFamily: "monospace", 
+            fontSize: 11, 
+            fontWeight: 700, 
+            letterSpacing: "0.22em", 
+            textTransform: "uppercase", 
+            cursor: "pointer",
+            marginBottom: "1rem"
+          }}
+        >
+          {loading ? "Connecting..." : "Sign in with Google"}
+        </button>
 
-          {/* Divider */}
-          <div style={{ 
-            display: "flex", 
-            alignItems: "center", 
-            marginBottom: "1rem",
-            color: "rgba(0,255,163,0.3)",
-            fontFamily: "monospace",
-            fontSize: 9,
-            letterSpacing: "0.2em"
-          }}>
+        {/* Divider */}
+        <div style={{ display: "flex", alignItems: "center", marginBottom: "1rem", color: "rgba(0,255,163,0.3)" }}>
+          <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
+          <span style={{ padding: "0 10px" }}>OR</span>
+          <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
+        </div>
             <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
             <span style={{ padding: "0 10px" }}>OR</span>
             <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
@@ -248,6 +241,5 @@ export default function LoginPage() {
           </div>
         </div>
       </div>
-    </div>
   );
 }
