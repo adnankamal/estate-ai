@@ -3,62 +3,32 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { supabase, getAuthStatus } from "../../lib/supabaseClient";
+import { supabase } from "../../lib/supabaseClient";
 import jsPDF from "jspdf";
+import ReactMarkdown from "react-markdown"; // Import fix
+import remarkGfm from "remark-gfm";       // Import fix
 
-const ReactMarkdown: any = dynamic(() => import("react-markdown"), { ssr: false });
-const remarkGfm: any = dynamic(() => import("remark-gfm"), { ssr: false });
-const SatelliteMap = dynamic(() => import("../components/SatelliteMap"), {
-  ssr: false,
-  loading: () => (
-    <div className="w-full h-96 flex items-center justify-center text-xs tracking-widest animate-pulse"
-      style={{ background: "rgba(0,0,0,0.5)", border: "1px solid rgba(0,255,163,0.1)", borderRadius: 8, color: "rgba(0,255,163,0.4)", fontFamily: "monospace" }}>
-      [CONNECTING_TO_SATELLITE_UPLINK...]
-    </div>
-  ),
-});
+// Dynamic imports
+const SatelliteMap = dynamic(() => import("../components/SatelliteMap"), { ssr: false });
 
-// ✅ AUTH GUARD — Sahi Redirect Path Ke Sath
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      let retries = 3;
-      let session = null;
-
-      while (retries > 0 && !session) {
-        const { data } = await supabase.auth.getSession();
-        session = data.session;
-        if (!session) {
-          await new Promise(resolve => setTimeout(resolve, 800));
-          retries--;
-        }
+    supabase.auth.getSession().then(({ data }: { data: { session: any } }) => {
+      if (!data.session) {
+      router.replace("/login");
+      } else {
+        setLoading(false);
       }
-
-      if (!session) {
-        // Corrected from "/login" to "/auth/login"
-        router.replace("/auth/login?error=session_expired");
-        return;
-      }
-      setLoading(false);
-    };
-    checkAuth();
+    });
   }, [router]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-black flex items-center justify-center">
-        <div className="text-green-400 font-mono text-sm animate-pulse">
-          [AUTHENTICATING...]
-        </div>
-      </div>
-    );
-  }
-
+  if (loading) return <div className="p-10 text-center">Authenticating...</div>;
   return <>{children}</>;
 }
+
 // ─── GLOBAL STYLES ───────────────────────────────────────────────────────────
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,wght@0,400;1,400&family=Inter:wght@400;600&display=swap');
@@ -567,45 +537,6 @@ export default function Dashboard() {
     user: any | null;
   }>({ status: "loading", user: null });
 
-  // ✅ PROFESSIONAL AUTH CHECK
-  useEffect(() => {
-    let mounted = true;
-    
-    const verifyAuth = async () => {
-      console.log("[DASHBOARD] Starting auth verification...");
-      
-      const { status, user, error } = await getAuthStatus(3, 800);
-      
-      if (!mounted) return;
-      
-      console.log(`[DASHBOARD] Auth status: ${status}`);
-      
-      if (status === "authenticated" && user) {
-        setAuthState({ status: "authenticated", user });
-      } else if (status === "unauthenticated") {
-        console.log("[DASHBOARD] Redirecting to login");
-        router.replace("/login");
-      } else if (status === "error") {
-        console.error("[DASHBOARD] Auth error:", error);
-        // Retry once more after longer delay
-        setTimeout(async () => {
-          const retry = await getAuthStatus(2, 1500);
-          if (!mounted) return;
-          
-          if (retry.status === "authenticated" && retry.user) {
-            setAuthState({ status: "authenticated", user: retry.user });
-          } else {
-            router.replace("/login");
-          }
-        }, 2000);
-      }
-    };
-    
-    verifyAuth();
-    
-    return () => { mounted = false; };
-  }, [router]);
-
   // ✅ LOADING STATE
   if (authState.status === "loading") {
     return (
@@ -680,19 +611,6 @@ export default function Dashboard() {
   const [messages, setMessages] = useState([
     { role: "assistant", content: "### ESTATE AI // SENTINEL CORE\nUplink Established. Provide asset parameters for forensic investment audit." },
   ]);
-
-  // auth check
-useEffect(() => {
-    supabase.auth.getUser().then(({ data }: { data: { user: any } }) => {
-      const user = data.user;
-      if (!user) {
-        router.push("/");
-      } else {
-        setUserEmail(user.email ?? null);
-        setUserId(user.id);
-      }
-    });
-  }, [router]);
 
   const addLog = useCallback((msg: string) => {
     const stamp = new Date().toLocaleTimeString("en-US", { hour12: false });
