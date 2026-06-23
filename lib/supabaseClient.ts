@@ -11,7 +11,13 @@ let client: ReturnType<typeof createBrowserClient> | null = null;
 
 export function getSupabaseBrowserClient() {
   if (!client) {
-    client = createBrowserClient(supabaseUrl, supabaseKey);
+    client = createBrowserClient(supabaseUrl, supabaseKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true, // OAuth callback tokens ko URL se capture karne ke liye mandatory hai
+      },
+    });
   }
   return client;
 }
@@ -22,18 +28,21 @@ export type AuthStatus = "loading" | "authenticated" | "unauthenticated" | "erro
 
 export async function getAuthStatus(
   maxRetries = 3,
-  delayMs = 800
+  delayMs = 600
 ): Promise<{ status: AuthStatus; user: any | null; error: Error | null }> {
+  
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const { data, error } = await supabase.auth.getUser();
+      // 1. getUser ki jagah getSession use karo local token parsing ke liye
+      const { data: { session }, error } = await supabase.auth.getSession();
       
       if (error) throw error;
       
-      if (data.user) {
-        return { status: "authenticated", user: data.user, error: null };
+      if (session?.user) {
+        return { status: "authenticated", user: session.user, error: null };
       }
       
+      // Agar session turant nahi mila, toh exponential backoff se thoda wait karo (hydration/URL parsing ke liye)
       if (attempt < maxRetries) {
         await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
       }
