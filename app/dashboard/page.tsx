@@ -18,7 +18,7 @@ const SatelliteMap = dynamic(() => import("../components/SatelliteMap"), {
   ),
 });
 
-// ✅ AUTH GUARD — alag component, no hooks conflict
+// ✅ AUTH GUARD — Sahi Redirect Path Ke Sath
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
@@ -38,7 +38,8 @@ function AuthGuard({ children }: { children: React.ReactNode }) {
       }
 
       if (!session) {
-        router.replace("/login");
+        // Corrected from "/login" to "/auth/login"
+        router.replace("/auth/login?error=session_expired");
         return;
       }
       setLoading(false);
