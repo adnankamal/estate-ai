@@ -104,18 +104,23 @@ export default function LoginPage() {
     setHovered(false);
   };
 
-  // ✅ GOOGLE LOGIN — ALAG FUNCTION, BAHAR
+  // ✅ GOOGLE LOGIN
   const handleGoogleLogin = async () => {
     setLoading(true);
-    await supabase.auth.signInWithOAuth({
+    setError(null);
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo: "https://estate-ai-kr85.vercel.app/auth/callback",
       },
     });
+    if (error) {
+      setError(error.message);
+      setLoading(false);
+    }
   };
 
-  // ✅ EMAIL LOGIN — ALAG FUNCTION
+  // ✅ EMAIL LOGIN
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email) return;
@@ -140,8 +145,8 @@ export default function LoginPage() {
     }
   };
 
-return (
-  <div className="min-h-screen w-full flex items-center justify-center relative overflow-hidden" style={{ background: "#03050E" }} onMouseMove={handleMouseMove}>
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center relative overflow-hidden" style={{ background: "#03050E" }} onMouseMove={handleMouseMove}>
       <GridLines />
       <AuroraCanvas />
       <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 70% 60% at 50% 50%, transparent 40%, #03050E 100%)" }} />
@@ -175,35 +180,31 @@ return (
 
           <div style={{ height: 1, background: "linear-gradient(to right, transparent, rgba(0,255,163,0.15) 40%, rgba(0,255,163,0.15) 60%, transparent)", marginBottom: "1.5rem" }} />
 
-          {/* ✅ GOOGLE BUTTON — YAHAN ADD KAR */}
-         <button 
-          onClick={handleGoogleLogin}
-          disabled={loading}
-          style={{ 
-            width: "100%", 
-            padding: "0.85rem", 
-            background: "linear-gradient(135deg, #4285F4, #34A853)", 
-            border: "1px solid rgba(66, 133, 244, 0.25)", 
-            borderRadius: 8, 
-            color: "#fff", 
-            fontFamily: "monospace", 
-            fontSize: 11, 
-            fontWeight: 700, 
-            letterSpacing: "0.22em", 
-            textTransform: "uppercase", 
-            cursor: "pointer",
-            marginBottom: "1rem"
-          }}
-        >
-          {loading ? "Connecting..." : "Sign in with Google"}
-        </button>
+          {/* ✅ GOOGLE BUTTON */}
+          <button 
+            onClick={handleGoogleLogin}
+            disabled={loading}
+            style={{ 
+              width: "100%", 
+              padding: "0.85rem", 
+              background: "linear-gradient(135deg, #4285F4, #34A853)", 
+              border: "1px solid rgba(66, 133, 244, 0.25)", 
+              borderRadius: 8, 
+              color: "#fff", 
+              fontFamily: "monospace", 
+              fontSize: 11, 
+              fontWeight: 700, 
+              letterSpacing: "0.22em", 
+              textTransform: "uppercase", 
+              cursor: "pointer",
+              marginBottom: "1rem"
+            }}
+          >
+            {loading ? "Connecting..." : "Sign in with Google"}
+          </button>
 
-        {/* Divider */}
-        <div style={{ display: "flex", alignItems: "center", marginBottom: "1rem", color: "rgba(0,255,163,0.3)" }}>
-          <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
-          <span style={{ padding: "0 10px" }}>OR</span>
-          <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
-        </div>
+          {/* Divider */}
+          <div style={{ display: "flex", alignItems: "center", marginBottom: "1rem", color: "rgba(0,255,163,0.3)", fontFamily: "monospace", fontSize: 10, letterSpacing: "0.1em" }}>
             <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
             <span style={{ padding: "0 10px" }}>OR</span>
             <div style={{ flex: 1, height: 1, background: "rgba(0,255,163,0.1)" }}></div>
@@ -241,5 +242,6 @@ return (
           </div>
         </div>
       </div>
+    </div>
   );
 }
