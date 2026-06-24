@@ -3,6 +3,17 @@
 @tailwind utilities;
 
 body {
-  background-color: #000000; /* Dashboard black hona chahiye */
+  background-color: #000000;
   color: #FFFFFF;
+  margin: 0;
+  padding: 0;
+  /* Mobile ke liye essential rules */
+  width: 100%;
+  overflow-x: hidden; 
+}
+
+/* Ye ensure karega ki koi bhi div screen se bahar na nikle */
+* {
+  max-width: 100%;
+  box-sizing: border-box;
 }
